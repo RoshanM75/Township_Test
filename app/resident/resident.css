@@ -402,10 +402,34 @@
         margin-inline: -.25rem;
         padding: .25rem;
     }
-    .tg[data-panel-minimized="true"]:not([data-view="saved"]) .tg-panel-body { display: none; }
-    .tg[data-panel-minimized="true"]:not([data-view="saved"]) .tg-sheet { flex: none; padding-block: .15rem; }
+    /* Three heights (minimised / part / full) that animate; the map above shrinks and grows with them. */
+    .tg-sheet {
+        flex: none;
+        height: var(--sheet-h);
+        max-height: none;
+        transition: height .34s cubic-bezier(.22, .9, .3, 1), padding .34s ease;
+        will-change: height;
+        --sheet-h: min(32dvh, 18rem);
+    }
+    .tg[data-panel="full"]:not([data-view="saved"]) .tg-sheet { --sheet-h: 78dvh; box-shadow: 0 -10px 30px rgba(20, 16, 30, .18); }
+    .tg[data-panel="min"]:not([data-view="saved"]) .tg-sheet { --sheet-h: 3.4rem; padding-block: .15rem; }
+    .tg-sheet.is-dragging { height: var(--sheet-drag); transition: none; }
+    .tg[data-panel="full"]:not([data-view="saved"]) .tg-map { min-height: 4rem; overflow: hidden; }
+    /* Floating map buttons get in the way of a thin map strip; fade them while the panel is fully open. */
+    .tg-map :is(.tg-map-controls, .tg-map-choice, .tg-map-fit, .tg-map-status, .tg-map-report, .leaflet-control-container, .maplibregl-ctrl-top-left, .maplibregl-ctrl-top-right, .maplibregl-ctrl-bottom-right) {
+        transition: opacity .2s ease;
+    }
+    .tg[data-panel="full"]:not([data-view="saved"]) .tg-map :is(.tg-map-controls, .tg-map-choice, .tg-map-fit, .tg-map-status, .tg-map-report, .leaflet-control-container, .maplibregl-ctrl-top-left, .maplibregl-ctrl-top-right, .maplibregl-ctrl-bottom-right) {
+        opacity: 0; pointer-events: none;
+    }
+    .tg-panel-body { transition: opacity .22s ease .08s, transform .3s cubic-bezier(.22, .9, .3, 1); }
+    .tg[data-panel="min"]:not([data-view="saved"]) .tg-sheet:not(.is-dragging) .tg-panel-body {
+        opacity: 0; transform: translateY(.75rem); pointer-events: none; visibility: hidden;
+        transition: opacity .15s ease, transform .2s ease, visibility 0s linear .2s;
+    }
+    .tg-panel-grip svg { transition: transform .3s ease; }
     .tg[data-view="saved"] .tg-map { display: none; }
-    .tg[data-view="saved"] .tg-sheet { flex: 1 1 auto; max-height: none; border-radius: 0; }
+    .tg[data-view="saved"] .tg-sheet { flex: 1 1 auto; height: auto; max-height: none; border-radius: 0; transition: none; }
 }
 @media (max-width: 1023px) and (max-height: 540px) {
     .tg { height: auto; min-height: 100dvh; overflow: visible; }
@@ -479,3 +503,21 @@
     .tg-start-field { margin: 0 0 .65rem 1rem; }
     .tg-panel-grip { display: none; }
 }
+
+/* Hazard photo: add, preview and the photo reader's status */
+.tg-photo { display: grid; gap: .4rem; }
+.tg-photo-row { display: flex; gap: .65rem; align-items: center; }
+.tg-photo-add, .tg-photo-thumb { flex: none; width: 5.5rem; height: 5.5rem; border-radius: .8rem; position: relative; overflow: hidden; }
+.tg-photo-add { display: grid; place-content: center; justify-items: center; gap: .2rem; border: 2px dashed var(--line);
+    background: var(--brand-soft); color: var(--brand); font-size: .8rem; font-weight: 700; cursor: pointer; }
+.tg-photo-add:has(+ input:focus-visible) { outline: 3px solid #1a56db; outline-offset: 2px; }
+.tg-photo-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.tg-photo-thumb button { position: absolute; top: .25rem; right: .25rem; width: 1.75rem; height: 1.75rem; border-radius: 999px;
+    border: 0; background: rgba(0,0,0,.6); color: #fff; display: grid; place-items: center; cursor: pointer; }
+.tg-photo-status p { display: block; }
+.tg-photo-status svg { display: inline; vertical-align: -2px; margin-right: .25rem; color: var(--brand); }
+.tg-spin { animation: tg-spin 1s linear infinite; }
+@keyframes tg-spin { to { transform: rotate(360deg); } }
+.tg-report-photo { float: right; width: 3.25rem; height: 3.25rem; object-fit: cover; border-radius: .5rem; margin-left: .5rem; }
+.tg.hc .tg-photo-add { border-color: #000; }
+.tg-photo-reason { display: block; margin-top: .2rem; font-size: .75rem; opacity: .8; overflow-wrap: anywhere; }

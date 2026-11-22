@@ -53,7 +53,7 @@ import { metres } from '@/lib/walking-geometry';
 
 
 import ResidentMap, { type MapMode } from '@/components/map/ResidentMap';
-import PanelGrip from '@/components/walking/PanelGrip';
+import PanelGrip, { type PanelState } from '@/components/walking/PanelGrip';
 import { presetStartPoints, type StartPoint } from '@/lib/start-points';
 import WeatherStrip from '@/components/walking/WeatherStrip';
 import WeatherWarningList from '@/components/walking/WeatherWarnings';
@@ -62,6 +62,8 @@ import AccessNotices from '@/components/walking/AccessNotices';
 import { withMappedDetails } from '@/lib/pilot-walking-details';
 import { activeAccessNotices } from '@/lib/access-notices';
 import type { WeatherWarnings } from '@/lib/weather-warnings';
+import HazardPhotoInput from '@/components/resident/HazardPhotoInput';
+import { photoDescription, type PhotoReading } from '@/lib/photo-hazard';
 import './resident.css';
 
 /* ------------------------------------------------------------------ */
@@ -91,6 +93,8 @@ interface DeviceHazard extends ReportMarker {
     description: string;
     location: string;
     dataset: string | undefined;
+    /** Small JPEG data URL of the hazard photo, kept with the report on this device. */
+    photo?: string;
 }
 const hazardKey = (area: PilotId) => `townshipgo:hazards:v1:${area}`;
 function readDeviceHazards(area: PilotId): DeviceHazard[] {
@@ -99,6 +103,7 @@ function readDeviceHazards(area: PilotId): DeviceHazard[] {
         return Array.isArray(value) ? value.filter(report => report && typeof report.id === 'string'
             && typeof report.category === 'string' && typeof report.description === 'string'
             && typeof report.location === 'string' && Number.isFinite(report.lat) && Number.isFinite(report.lng)
+            && (report.photo === undefined || (typeof report.photo === 'string' && report.photo.startsWith('data:image/')))
             && pointInPilot([report.lat, report.lng], area)) : [];
     } catch { return []; }
 }
@@ -261,7 +266,10 @@ function ResidentPageContent() {
     const [view, setView] = useState<'explore' | 'plan' | 'walk' | 'saved'>(walkSession && !initialWalk.fromLink ? 'walk' : 'plan');
     const [returning, setReturning] = useState(searchParams.get('return') === '1');
     const [savingPack, setSavingPack] = useState(false);
-    const [panelMinimized, setPanelMinimized] = useState(view === 'walk');
+    const [panelState, setPanelState] = useState<PanelState>(view === 'walk' ? 'min' : 'partial');
+    const panelMinimized = panelState === 'min';
+    // Showing new content opens the panel to part height; minimising keeps the old behaviour.
+    const setPanelMinimized = (minimized: boolean) => setPanelState(current => minimized ? 'min' : current === 'full' ? 'full' : 'partial');
     const [livePoint, setLivePoint] = useState<[number, number] | null>(null);
     const [mapFocus, setMapFocus] = useState<[number, number] | undefined>();
 
@@ -274,6 +282,8 @@ function ResidentPageContent() {
     const [informationLayer, setInformationLayer] = useState<EnvironmentLayer | 'routes'>('routes');
     const [selectedKind, setSelectedKind] = useState<HazardKind>('broken_surface');
     const [reportNotes, setReportNotes] = useState('');
+    const [reportPhoto, setReportPhoto] = useState<string | null>(null);
+    const [autoNote, setAutoNote] = useState<string | null>(null);
     const [isSubmittingReport, setIsSubmittingReport] = useState(false);
     const [reportMsg, setReportMsg] = useState<string | null>(null);
 
@@ -677,6 +687,18 @@ function ResidentPageContent() {
         }, { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 });
     }
 
+    /* A photo reading picks the category and writes the details, unless the person already typed their own. */
+    function applyPhotoReading(reading: PhotoReading) {
+        if (!reading.kind) return;
+        setSelectedKind(reading.kind);
+        const text = photoDescription(reading, reportEdge?.name);
+        if (text && (!reportNotes.trim() || reportNotes === autoNote)) {
+            setReportNotes(text);
+            setAutoNote(text);
+        }
+        buzz();
+    }
+
     function updateDeviceHazards(next: DeviceHazard[]) {
         localStorage.setItem(hazardKey(area), JSON.stringify(next));
         setDeviceHazards(next);
@@ -691,7 +713,8 @@ function ResidentPageContent() {
             if (IS_PAGES_PREVIEW) {
                 const category = HAZARD_OPTIONS.find(option => option.kind === selectedKind)!.label;
                 updateDeviceHazards([{ id: crypto.randomUUID(), lat, lng, category, description: reportNotes.trim(),
-                    location: reportEdge.name ?? 'Mapped footpath', dataset: sourceWalkingData?.dataset_id },
+                    location: reportEdge.name ?? 'Mapped footpath', dataset: sourceWalkingData?.dataset_id,
+                    ...(reportPhoto ? { photo: reportPhoto } : {}) },
                 ...deviceHazards]);
                 setReportMsg('Saved on this device.');
                 speak('Your report was saved on this device.');
@@ -705,6 +728,8 @@ function ResidentPageContent() {
                 speak('Your report was sent.');
             }
             setReportNotes('');
+            setAutoNote(null);
+            setReportPhoto(null);
             setReportPoint(null);
             buzz(120);
         } catch (error) {
@@ -766,7 +791,7 @@ function ResidentPageContent() {
     /* ---------------------------------------------------------------- */
 
     return (
-        <div data-view={view} data-panel-minimized={panelMinimized || pickingHazard} className={`tg font-sans relative w-full h-[100dvh] flex flex-col overflow-hidden shadow-2xl ${prefs.highContrast ? 'hc' : ''} ${prefs.reduceMotion ? 'rm' : ''}`}>
+        <div data-view={view} data-panel-minimized={panelMinimized || pickingHazard} data-panel={pickingHazard ? 'min' : panelState} className={`tg font-sans relative w-full h-[100dvh] flex flex-col overflow-hidden shadow-2xl ${prefs.highContrast ? 'hc' : ''} ${prefs.reduceMotion ? 'rm' : ''}`}>
 
             <div className="tg-topbar">
             <a href="#walk-planning" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[3000] focus:rounded-xl focus:bg-white focus:p-3 focus:font-bold text-slate-900">Skip to walk planning</a>
@@ -854,7 +879,7 @@ function ResidentPageContent() {
             </div>
 
             <section id="walk-planning" aria-label="Walk planning" tabIndex={-1} className="tg-sheet">
-                {view !== 'saved' && !pickingHazard && <PanelGrip minimized={panelMinimized} walk={view === 'walk'} onChange={setPanelMinimized} />}
+                {view !== 'saved' && !pickingHazard && <PanelGrip state={panelState} walk={view === 'walk'} onChange={setPanelState} />}
                 <div id="walking-panel" className="tg-panel-body">
                 {libraryMessage && <div role="status" className="tg-note mb-3"><p>{libraryMessage}</p><button className="min-h-11 text-sm font-bold underline" onClick={() => setLibraryMessage(null)}>Dismiss message</button></div>}
                 {!!accessNotices.length && <div className="mb-3"><AccessNotices notices={accessNotices} onFocus={focusWalkPoint} /></div>}
@@ -1134,6 +1159,9 @@ function ResidentPageContent() {
                                 <button type="button" className="tg-btn" disabled={reportLocated} onClick={locateReport}>{reportLocated ? 'Finding…' : 'My location'}</button>
                             </div>
                         </div>
+                        <HazardPhotoInput photo={reportPhoto} onPhoto={setReportPhoto} onReading={applyPhotoReading}
+                            kindLabel={kind => HAZARD_OPTIONS.find(option => option.kind === kind)?.label ?? 'a hazard'} />
+                        {reportPhoto && !IS_PAGES_PREVIEW && <p className="tg-small">The photo helps fill in this form; only the details are sent with the report for now.</p>}
                         <label className="tg-label">Details (optional)<textarea className="tg-input mt-1" value={reportNotes} maxLength={500}
                             onChange={event => setReportNotes(event.target.value)} placeholder="For example, a loose slab beside the crossing" /></label>
                         {reportMsg && <p className="tg-note" role="status">{reportMsg}</p>}
@@ -1145,6 +1173,8 @@ function ResidentPageContent() {
                         <summary>{IS_PAGES_PREVIEW ? `Saved on this device (${deviceHazards.length})` : `Open area reports (${reports.length})`}</summary>
                         <ul className="tg-report-list">
                             {(IS_PAGES_PREVIEW ? deviceHazards : reports).map((report, index) => <li key={report.id ?? index}>
+                                {/* eslint-disable-next-line @next/next/no-img-element -- photo stored on this device as a data URL */}
+                                {'photo' in report && typeof report.photo === 'string' && <img className="tg-report-photo" src={report.photo} alt="" />}
                                 <strong>{report.category || 'Reported hazard'}</strong>
                                 {report.description && <p>{report.description}</p>}
                                 {'location' in report && typeof report.location === 'string' && <p>{report.location}</p>}
