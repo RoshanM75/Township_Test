@@ -1,8 +1,11 @@
-import { readFile,mkdir,writeFile } from 'node:fs/promises';
+import { mkdir,writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { gisLayers } from './pilot-snapshot.mjs';
+import { loadPagesPilot } from './pilot-export.mjs';
 
-const bundle=JSON.parse(await readFile(new URL('../data/pasar-seni/bundle.json',import.meta.url),'utf8'));
+const bundle=await loadPagesPilot(fileURLToPath(new URL('../data/pasar-seni/bundle.json',import.meta.url)));
+if(!bundle)throw Error('Load the Pasar Seni source bundle before exporting GIS data.');
 const out=resolve(process.argv[2]||'.local/gis/pasar-seni');await mkdir(out,{recursive:true});
 const layers=gisLayers(bundle);
 for(const [name,layer]of Object.entries(layers))await writeFile(resolve(out,`${name}.geojson`),JSON.stringify(layer));

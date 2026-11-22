@@ -179,11 +179,18 @@ test('Next.js APIs with real PostgreSQL/PostGIS', { timeout: 60000 }, async (t) 
             assert.equal((await save({ ...observation, observed_at: new Date(Date.now() + 86400000).toISOString() })).status, 400);
             assert.equal((await save({ ...observation, target_id: '999999' })).status, 404);
             assert.equal((await save({ ...observation, attributes: { slope_pct: 101 } })).status, 400);
+            assert.equal((await save({ ...observation, attributes: { clear_width_m: 1.25 } })).status, 201);
+            assert.equal((await save({ ...observation, attributes: { clear_width_m: 0 } })).status, 400);
+            assert.equal((await save({ ...observation, attributes: { audible_signal: true } })).status, 400);
             assert.equal((await save({ ...observation, attributes: { medical_risk_score: 99 } })).status, 400);
             const facility = data.assets.find(a => a.kind === 'rest');
             assert.equal((await save({ ...observation, target_type: 'facility', target_id: facility.id, attributes: { has_seat: true, path_connection: true, available: true, opening_hours: '24/7' } })).status, 201);
             const entrance = data.assets.find(a => a.kind === 'entrance');
             assert.equal((await save({ ...observation, target_type: 'entrance', target_id: entrance.id, attributes: { step_free: true, path_connection: true, available: true, opening_hours: 'Mo-Fr 09:00-17:00' } })).status, 201);
+            const outage = await save({ ...observation, target_type: 'entrance', target_id: entrance.id,
+                method: 'operator_record', attributes: { lift_available: false } });
+            assert.equal(outage.status, 201);
+            assert.equal((await request('/api/walking-data')).body.verifications.find(record => record.id === outage.body.id).attributes.lift_available, false);
             assert.equal((await save({ ...observation, target_type: 'facility', target_id: entrance.id, attributes: { available: true } })).status, 404);
         });
         await t.test('quick condition changes are stored as reports, including facility availability', async () => {
@@ -201,6 +208,7 @@ test('Next.js APIs with real PostgreSQL/PostGIS', { timeout: 60000 }, async (t) 
         await t.test('pilot imports preserve the example and isolate graph, reports and verification targets',async()=>{
             assert.equal((await request('/api/graph?area=unknown')).status,400);
             assert.equal((await request('/api/weather?area=unknown')).status,400);
+            assert.equal((await request('/api/weather-warnings?area=unknown')).status,400);
             assert.equal((await request('/api/pilot-context?area=pasar-seni')).status,503);
             assert.equal((await request('/api/walking-data?area=pasar-seni')).status,503);
             const before=(await request('/api/walking-data?area=elmina')).body;
@@ -225,6 +233,16 @@ test('Next.js APIs with real PostgreSQL/PostGIS', { timeout: 60000 }, async (t) 
             const update={kind:'blocked',target_type:'path',target_id:String(main.edges[0].id),observed_at:new Date().toISOString(),area_id:'elmina'};
             assert.equal((await save(update)).status,404);
             assert.equal((await save({...update,area_id:'pasar-seni'})).status,201);
+            const previousChecks=(await request('/api/walking-data?area=pasar-seni')).body.verifications;
+            const station=walking.assets.find(asset=>asset.kind==='transit');
+            const gate=walking.assets.find(asset=>asset.parent_id===station.id);
+            const extra={...gate,id:'70000000000000',external_id:'integration-supplemental-gate',name:'Test supplementary gate'};
+            const augmented={...bundle,walking:{...bundle.walking,assets:[...bundle.walking.assets,extra]},supplemental_assets:[extra]};
+            await seedPilotArea(fixture,augmented);
+            await seedPilotArea(fixture,augmented);
+            const after=(await request('/api/walking-data?area=pasar-seni')).body;
+            assert.equal(after.assets.filter(asset=>asset.id===extra.id).length,1);
+            assert.deepEqual(after.verifications,previousChecks);
             const assets=body=>request('/api/assets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
             assert.equal((await assets({kind:'entrance',name:'Wrong area parent',parent_id:walking.assets.find(a=>a.kind==='destination').id,lat:3.1425,lng:101.6945,area_id:'elmina'})).status,404);
             const changed=structuredClone(bundle);changed.context.dataset_id='changed';changed.graph.source.dataset_id='changed';changed.walking.dataset_id='changed';

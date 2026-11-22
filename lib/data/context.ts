@@ -1,31 +1,109 @@
-import type { PilotContext, PilotId, TransitStop } from '../pilots.ts';
+import type { PilotContext, PilotId, TransitCalendar, TransitPattern, TransitStop } from '../pilots.ts';
 import { PILOTS, pointInPilot } from '../pilots.ts';
 
 export function transitContext(files: Record<string,Record<string,string>[]>, agency: string, area: PilotId) {
+    const qualify = (id: string) => `${agency}:${id}`;
     const stops = files['stops.txt'] ?? [];
-    const routes = new Map((files['routes.txt']??[]).map(r=>[r.route_id,r]));
-    const trips = new Map((files['trips.txt']??[]).map(t=>[t.trip_id,t.route_id]));
-    const serviceByStop = new Map<string,Set<string>>();
-    for(const t of files['stop_times.txt']??[]){const id=trips.get(t.trip_id);if(!id||!routes.has(id))continue;if(!serviceByStop.has(t.stop_id))serviceByStop.set(t.stop_id,new Set());serviceByStop.get(t.stop_id)!.add(id);}
-    const chosen: TransitStop[] = stops.filter(s=>s.stop_lat?.trim()&&s.stop_lon?.trim()&&pointInPilot([Number(s.stop_lat),Number(s.stop_lon)],area)).map(s=>({
-        id:`${agency}:${s.stop_id}`,name:s.stop_name,lat:Number(s.stop_lat),lng:Number(s.stop_lon),agency,parent_station:s.parent_station||'',location_type:s.location_type||'0',routes:[...(serviceByStop.get(s.stop_id)??[])].map(id=>`${agency}:${id}`),
-    }));
-    const used=new Set(chosen.flatMap(s=>s.routes));
-    return { stops:chosen, routes:[...routes.values()].filter(r=>used.has(`${agency}:${r.route_id}`)).map(r=>({id:`${agency}:${r.route_id}`,name:[r.route_short_name,r.route_long_name].filter(Boolean).join(' · '),agency})),
-        service_dates:(files['calendar.txt']??[]).map(c=>`${c.start_date}–${c.end_date}`) };
+    const routes = new Map((files['routes.txt'] ?? []).map(r => [r.route_id, r]));
+    const trips = new Map((files['trips.txt'] ?? []).map(t => [t.trip_id, t]));
+    const origins = new Map((files.trip_origins ?? []).map(r => [r.trip_id, parseTime(r.time)]));
+    const frequencies = new Map<string, TransitPattern['windows']>();
+    for (const row of files['frequencies.txt'] ?? []) {
+        if (!frequencies.has(row.trip_id)) frequencies.set(row.trip_id, []);
+        const start = parseTime(row.start_time), end = parseTime(row.end_time), gap = Number(row.headway_secs);
+        if (start !== null && end !== null && end > start && gap > 0 && Number.isSafeInteger(gap)) {
+            frequencies.get(row.trip_id)!.push([start, end, gap]);
+        }
+    }
+    const weekdays = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const calendars: Record<string, TransitCalendar> = {};
+    for (const row of files['calendar.txt'] ?? []) {
+        if (!/^\d{8}$/.test(row.start_date) || !/^\d{8}$/.test(row.end_date) || row.end_date < row.start_date) continue;
+        calendars[qualify(row.service_id)] = { from: row.start_date, to: row.end_date,
+            weekdays: weekdays.map(day => row[day] === '1'), exceptions: {} };
+    }
+    for (const row of files['calendar_dates.txt'] ?? []) {
+        if (!/^\d{8}$/.test(row.date) || !['1', '2'].includes(row.exception_type)) continue;
+        const rule = calendars[qualify(row.service_id)] ??= { from: '', to: '', weekdays: [], exceptions: {} };
+        rule.exceptions[row.date] = row.exception_type === '1';
+    }
+    const chosen = new Map<string, TransitStop>();
+    for (const s of stops) {
+        const point: [number, number] = [Number(s.stop_lat), Number(s.stop_lon)];
+        if (!s.stop_id || !s.stop_name || !s.stop_lat?.trim() || !s.stop_lon?.trim() || !pointInPilot(point, area)) continue;
+        chosen.set(s.stop_id, { id: qualify(s.stop_id), name: s.stop_name, lat: point[0], lng: point[1], agency,
+            parent_station: s.parent_station || '', location_type: s.location_type || '0', routes: [],
+            ...(s.stop_code || agency === 'rapid-rail-kl' ? { code: s.stop_code || s.stop_id } : {}),
+            ...(s.wheelchair_boarding === '1' ? { boarding: 'yes' } : s.wheelchair_boarding === '2' ? { boarding: 'no' } : {}) });
+    }
+    const byStop = new Map<string, Map<string, TransitPattern>>();
+    for (const time of files['stop_times.txt'] ?? []) {
+        const stop = chosen.get(time.stop_id), trip = trips.get(time.trip_id);
+        if (!stop || !trip || !routes.has(trip.route_id)) continue;
+        const route = qualify(trip.route_id);
+        if (!stop.routes.includes(route)) stop.routes.push(route);
+        const departure = parseTime(time.departure_time || time.arrival_time);
+        const service = qualify(trip.service_id);
+        if (departure === null || !calendars[service] || time.pickup_type === '1') continue;
+        const headsign = time.stop_headsign || trip.trip_headsign || '';
+        const key = JSON.stringify([route, service, headsign]);
+        if (!byStop.has(stop.id)) byStop.set(stop.id, new Map());
+        const byPattern = byStop.get(stop.id)!;
+        const pattern = byPattern.get(key) ?? { route_id: route, service_id: service, headsign, times: [], windows: [] };
+        const windows = frequencies.get(time.trip_id);
+        if (windows) {
+            const origin = origins.get(time.trip_id);
+            if (origin !== undefined && origin !== null && origin <= departure) {
+                const offset = departure - origin;
+                for (const [start, end, gap] of windows) pattern.windows.push([start + offset, end + offset, gap]);
+            }
+        } else pattern.times.push(departure);
+        byPattern.set(key, pattern);
+    }
+    for (const stop of chosen.values()) {
+        const patterns = byStop.get(stop.id);
+        if (!patterns) continue;
+        stop.patterns = [...patterns.values()].filter(p => p.times.length || p.windows.length).map(p => ({
+            ...p, times: [...new Set(p.times)].sort((a, b) => a - b),
+            windows: [...new Map(p.windows.map(window => [window.join(':'), window])).values()],
+        }));
+    }
+    const local = [...chosen.values()];
+    const used = new Set(local.flatMap(stop => stop.routes));
+    const services = new Set(local.flatMap(stop => stop.patterns?.map(pattern => pattern.service_id) ?? []));
+    return {
+        stops: local,
+        routes: [...routes.values()].filter(r => used.has(qualify(r.route_id))).map(r => ({
+            id: qualify(r.route_id), name: [r.route_short_name, r.route_long_name].filter(Boolean).join(' · ') || r.route_id, agency,
+        })),
+        service_dates: [...new Set(Object.values(calendars).filter(c => c.from).map(c => `${c.from}–${c.to}`))],
+        calendars: Object.fromEntries(Object.entries(calendars).filter(([id]) => services.has(id))),
+    };
+}
+
+function parseTime(value: string | undefined) {
+    const match = /^(\d{1,2}):([0-5]\d):([0-5]\d)$/.exec(value ?? '');
+    return match && Number(match[1]) < 48 ? Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]) : null;
 }
 
 export function railDemand(rows: Record<string,string>[], stopNames: string[]) {
     const normalise=(v:string)=>v.normalize('NFKD').replace(/[^a-z0-9]/gi,'').toLowerCase();
     const wanted=new Set([...stopNames,'Pasar Seni','Masjid Jamek','Merdeka'].map(normalise));
     const dates=rows.map(r=>r.date).filter(d=>/^\d{4}-\d{2}-\d{2}$/.test(d));const date=dates.sort().at(-1)??null;
-    const stations=new Map<string,{name:string;entries:number;exits:number}>();
+    const stations=new Map<string,{name:string;entries:number;exits:number;totalEntries?:number;totalExits?:number}>();
     for(const r of rows){const count=Number(r.ridership);if(r.date!==date||!Number.isFinite(count)||count<0||!r.ridership?.trim())continue;
         for(const [field,measure] of [['origin','entries'],['destination','exits']] as const){const name=r[field];if(!name||!wanted.has(normalise(name)))continue;
-            if(!stations.has(name))stations.set(name,{name,entries:0,exits:0});stations.get(name)![measure]+=count;
+            if(!stations.has(name))stations.set(name,{name,entries:0,exits:0});
+            const station=stations.get(name)!;
+            const other=r[field==='origin'?'destination':'origin']??'';
+            if(/^(?:A0\s*:|all stations$)/i.test(other)){
+                if(measure==='entries')station.totalEntries=count;
+                else station.totalExits=count;
+            }else station[measure]+=count;
         }
     }
-    return {data_at:date,stations:[...stations.values()],note:'Station tap-in/tap-out journeys are a transit-demand measure. They do not measure pavement traffic or accessibility.'};
+    return {data_at:date,stations:[...stations.values()].map(s=>({ name:s.name, entries:s.totalEntries??s.entries, exits:s.totalExits??s.exits })),
+        note:'Counts give station tap-in and tap-out journeys for the stated day. Street footfall and access conditions require separate observations.'};
 }
 
 export function districtPopulation(rows: Record<string,string>[], area: PilotId): PilotContext['demographics'] {

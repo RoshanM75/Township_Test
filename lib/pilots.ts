@@ -1,4 +1,5 @@
 import { DEFAULT_ORIGIN, DESTINATIONS } from './precinct.ts';
+import type { PilotWalkingDetails } from './pilot-walking-details.ts';
 
 export type PilotId = 'pasar-seni' | 'um-campus' | 'elmina';
 // The Pages builder derives this public flag from the validated source files.
@@ -47,17 +48,42 @@ export function pointInPilot(point: [number, number], area: PilotId) {
 }
 
 export interface SourceCoverage { id: string; name: string; url: string; license: string; status: 'loaded' | 'partial' | 'unavailable' | 'not_loaded';
-    fetched_at: string | null; data_at: string | null; records: number; note: string }
-export interface TransitStop { id: string; name: string; lat: number; lng: number; agency: string; routes: string[]; parent_station: string; location_type: string }
+    fetched_at: string | null; data_at: string | null; records: number; note: string; archive_url?: string | null }
+export interface TransitPattern {
+    route_id: string;
+    service_id: string;
+    headsign: string;
+    times: number[];
+    windows: Array<[start: number, end: number, interval: number]>;
+}
+export interface TransitCalendar {
+    from: string;
+    to: string;
+    weekdays: boolean[];
+    exceptions: Record<string, boolean>;
+}
+export interface TransitStop {
+    id: string; name: string; lat: number; lng: number; agency: string;
+    routes: string[]; parent_station: string; location_type: string;
+    code?: string;
+    boarding?: 'yes' | 'no';
+    patterns?: TransitPattern[];
+    walking_asset_id?: string;
+    approach?: { lat: number; lng: number; edge_id: number; fraction: number; distance_m: number };
+}
 export interface PilotContext {
     area_id: PilotId; dataset_id: string; built_at: string;
     origin: { coordinates: [number, number]; label: string; source_ref: string };
     featured_ids: string[];
     coverage: { nodes: number; paths: number; crossings: number; components: number; largest_component_paths: number; destinations: number; facilities: number; entrances: number; approximate_approaches: number; unconnected_places: number };
     sources: SourceCoverage[];
-    transit: { stops: TransitStop[]; routes: Array<{ id: string; name: string; agency: string }>; service_dates: string[] };
+    transit: {
+        stops: TransitStop[]; routes: Array<{ id: string; name: string; agency: string }>; service_dates: string[];
+        calendars?: Record<string, TransitCalendar>;
+    };
     demand: { data_at: string | null; stations: Array<{ name: string; entries: number; exits: number }>; note: string };
     demographics: { district: string; year: string | null; population: number | null; older_population: number | null; older_share: number | null; note: string };
     landmarks: Array<{ id: string; name: string; description: string; url: string; coordinates: [number, number] }>;
     environment: { scenes: Array<{ id: string; date: string; cloud_percent: number | null; collection: string; bbox: number[]; url: string }>; note: string };
+    walking_details?: PilotWalkingDetails;
 }

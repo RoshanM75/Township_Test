@@ -22,8 +22,8 @@ export function createPilotSnapshot(rawGraph,osm,inputs={},now=new Date().toISOS
     const cultural=a=>a.kind==='transit'||a.category==='park'||['attraction','museum','gallery'].includes(String(a.properties.tourism_type));
     const featured=[...selected,...connected.filter(a=>!selected.includes(a.id)).sort((a,b)=>Number(cultural(b))-Number(cultural(a))||a.name.localeCompare(b.name)).map(a=>a.id)].slice(0,8);
     const id=createHash('sha256').update(JSON.stringify({nodes:graph.nodes,edges:graph.edges,assets})).digest('hex');
-    const transit={stops:[],routes:[],service_dates:[]};
-    for(const [agency,files]of Object.entries(inputs.gtfs??{})){const part=transitContext(files,agency,area);transit.stops.push(...part.stops);transit.routes.push(...part.routes);transit.service_dates.push(...part.service_dates);}
+    const transit={stops:[],routes:[],service_dates:[],calendars:{}};
+    for(const [agency,files]of Object.entries(inputs.gtfs??{})){const part=transitContext(files,agency,area);transit.stops.push(...part.stops);transit.routes.push(...part.routes);transit.service_dates.push(...part.service_dates);Object.assign(transit.calendars,part.calendars);}
     const context={area_id:area,dataset_id:id,built_at:now,origin,featured_ids:featured,coverage,sources:inputs.sources??[],transit,
         demand:railDemand(inputs.ridership??[],transit.stops.map(s=>s.name)),demographics:districtPopulation(inputs.population??[],area),landmarks:wikidataLandmarks(inputs.wikidata??{},area),
         environment:{scenes:satelliteScenes(inputs.satellite??{},area),note:'Satellite scenes and land-cover products provide environmental context at their published resolution. They do not verify footpath shade, heat, kerbs or working lights.'}};
@@ -36,9 +36,12 @@ export function gisLayers(bundle){
     const collection=features=>({type:'FeatureCollection',features});
     const {component}=networkCoverage(bundle.graph.nodes,bundle.graph.edges,bundle.walking.assets);
     return {
-        paths:collection(bundle.graph.edges.map(e=>feature({type:'LineString',coordinates:e.geometry},{id:e.id,osm_way_id:e.osm_way_id,name:e.name,kind:e.kind,component:component.get(e.from_node),length_m:e.length_m,covered:e.covered,level:e.level,layer:e.layer,foot_direction:e.foot_direction,evidence:'mapped; not field checked'}))),
-        places:collection(bundle.walking.assets.map(a=>feature({type:'Point',coordinates:[a.lng,a.lat]},{id:a.id,external_id:a.external_id,name:a.name,kind:a.kind,parent_id:a.parent_id,edge_id:a.edge_id,connection_m:a.connection_distance_m,connection_model:a.properties.connection_model,source_ref:a.source_ref,evidence:'mapped; not field checked'}))),
-        transit:collection(bundle.context.transit.stops.map(s=>feature({type:'Point',coordinates:[s.lng,s.lat]},{...s,routes:s.routes.join(';'),entrance_checked:false}))),
+        paths:collection(bundle.graph.edges.map(e=>feature({type:'LineString',coordinates:e.geometry},{id:e.id,osm_way_id:e.osm_way_id,name:e.name,kind:e.kind,component:component.get(e.from_node),length_m:e.length_m,covered:e.covered,level:e.level,layer:e.layer,foot_direction:e.foot_direction,
+            ...bundle.context.walking_details?.paths[e.id],evidence:'mapped or modelled; field checks separate'}))),
+        places:collection(bundle.walking.assets.map(a=>feature({type:'Point',coordinates:[a.lng,a.lat]},{id:a.id,external_id:a.external_id,name:a.name,kind:a.kind,parent_id:a.parent_id,edge_id:a.edge_id,connection_m:a.connection_distance_m,connection_model:a.properties.connection_model,source_ref:a.source_ref,
+            ...bundle.context.walking_details?.facilities[a.id],evidence:'mapped; field checks separate'}))),
+        transit:collection(bundle.context.transit.stops.map(({patterns, approach, ...s})=>feature({type:'Point',coordinates:[s.lng,s.lat]},
+            {...s,routes:s.routes.join(';'),schedule_patterns:patterns?.length??0,approach_edge_id:approach?.edge_id??null,approach_distance_m:approach?.distance_m??null,entrance_checked:false}))),
         satellite:collection(bundle.context.environment.scenes.map(s=>feature({type:'Polygon',coordinates:[[[s.bbox[0],s.bbox[1]],[s.bbox[2],s.bbox[1]],[s.bbox[2],s.bbox[3]],[s.bbox[0],s.bbox[3]],[s.bbox[0],s.bbox[1]]]]},{id:s.id,date:s.date,collection:s.collection,cloud_percent:s.cloud_percent,evidence:'scene footprint; not measured footpath shade'}))),
     };
 }

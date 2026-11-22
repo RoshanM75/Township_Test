@@ -22,7 +22,7 @@ test('zero shade/light and explicitly absent cover are information, not missing 
     const data=edges.map(e=>({...e,covered:false,shade_morning:0,lit_ratio:0}));
     for(const layer of ['shade','cover','lighting']){
         const result=environmentSegments(data,[],AT,layer);
-        assert.ok(result.every(s=>s.value!==null&&s.source==='mapped'));
+        assert.ok(result.every(s=>s.value!==null&&s.source===(layer==='shade'?'modelled':'mapped')));
         assert.equal(environmentCoverage(result).known,3);
         assert.equal(environmentCoverage(result).checked,0);
     }

@@ -21,8 +21,17 @@ export async function seedPilotArea(pool,bundle){
             await client.query(`INSERT INTO path_edges(id,from_node,to_node,osm_way_id,name,source_highway,pedestrian_access,geometry,length_m,kind,surface,covered,has_steps,slope_pct,surface_rating,is_crossing,crossing_type,crossing_width_m,ped_green_s,cycle_s,has_kerb_ramp,has_refuge,shade_morning,shade_midday,shade_afternoon,shade_source,lit_ratio,lighting_source,foot_direction,area_id)
                 SELECT id,from_node,to_node,osm_way_id,name,source_highway,pedestrian_access,geometry,length_m,kind,surface,covered,has_steps,slope_pct,surface_rating,is_crossing,crossing_type,crossing_width_m,ped_green_s,cycle_s,has_kerb_ramp,has_refuge,shade_morning,shade_midday,shade_afternoon,shade_source,lit_ratio,lighting_source,COALESCE(foot_direction,'both'),$2
                 FROM jsonb_to_recordset($1::jsonb) AS e(id bigint,from_node bigint,to_node bigint,osm_way_id bigint,name text,source_highway text,pedestrian_access boolean,geometry jsonb,length_m float8,kind text,surface text,covered boolean,has_steps boolean,slope_pct float8,surface_rating int,is_crossing boolean,crossing_type text,crossing_width_m float8,ped_green_s float8,cycle_s float8,has_kerb_ramp boolean,has_refuge boolean,shade_morning float8,shade_midday float8,shade_afternoon float8,shade_source text,lit_ratio float8,lighting_source text,foot_direction text)`,[JSON.stringify(bundle.graph.edges),area]);
-            for(const a of bundle.walking.assets)await client.query(`INSERT INTO walking_assets(id,external_id,parent_id,kind,category,name,lat,lng,source,source_ref,properties,edge_id,edge_fraction,connection_distance_m,area_id)
-                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,[a.id,a.external_id,a.parent_id,a.kind,a.category,a.name,a.lat,a.lng,a.source,a.source_ref,JSON.stringify(a.properties),a.edge_id,a.edge_fraction,a.connection_distance_m,area]);
+        }
+        const add = existing.rows[0].count ? bundle.supplemental_assets ?? [] : bundle.walking.assets;
+        for (const a of add) {
+            const inserted = await client.query(`INSERT INTO walking_assets(id,external_id,parent_id,kind,category,name,lat,lng,source,source_ref,properties,edge_id,edge_fraction,connection_distance_m,area_id)
+                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT (id) DO NOTHING`,
+            [a.id,a.external_id,a.parent_id,a.kind,a.category,a.name,a.lat,a.lng,a.source,a.source_ref,JSON.stringify(a.properties),a.edge_id,a.edge_fraction,a.connection_distance_m,area]);
+            if (inserted.rowCount) continue;
+            const match = await client.query(`SELECT id FROM walking_assets WHERE id=$1 AND area_id=$2 AND external_id=$3
+                AND parent_id IS NOT DISTINCT FROM $4::bigint AND source_ref=$5 AND edge_id IS NOT DISTINCT FROM $6::bigint`,
+            [a.id,area,a.external_id,a.parent_id,a.source_ref,a.edge_id]);
+            if (!match.rowCount) throw Error('A mapped access point conflicts with an existing verification target.');
         }
         for(const [key,value]of [[`pilot:${area}:revision`,bundle.context.dataset_id],[`pilot:${area}:context`,JSON.stringify(bundle.context)]])await client.query('INSERT INTO app_metadata(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value',[key,value]);
         await client.query('COMMIT');console.log(`${PILOTS[area].short_name} source data ready; ${bundle.graph.edges.length} paths.`);

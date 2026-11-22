@@ -5,6 +5,7 @@ import { IS_PAGES_PREVIEW, dataPath } from './site.ts';
 import { weatherUrl, parseWeather, unavailableWeather, type WalkingWeather } from './comfort.ts';
 import { DEFAULT_ORIGIN } from './precinct.ts';
 import { PILOTS,type PilotId,type PilotContext } from './pilots.ts';
+import { parseWeatherWarnings, unavailableWarnings, warningUrl, type WeatherWarnings } from './weather-warnings.ts';
 
 export interface GraphData {
     nodes: PathNode[];
@@ -61,4 +62,16 @@ export async function loadWeather(area?:PilotId): Promise<WalkingWeather> {
         const value = await response.json();
         return IS_PAGES_PREVIEW ? parseWeather(value, now) : value as WalkingWeather;
     } catch { return unavailableWeather(now); }
+}
+
+export async function loadWeatherWarnings(area: PilotId): Promise<WeatherWarnings> {
+    try {
+        const response = await fetch(IS_PAGES_PREVIEW ? warningUrl() : dataPath('/api/weather-warnings', area),
+            { signal: AbortSignal.timeout(6500) });
+        if (!response.ok) return unavailableWarnings();
+        const value = await response.json();
+        return IS_PAGES_PREVIEW ? parseWeatherWarnings(value, area) : value as WeatherWarnings;
+    } catch {
+        return unavailableWarnings();
+    }
 }

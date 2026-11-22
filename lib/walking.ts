@@ -41,7 +41,7 @@ export interface WalkingAsset {
     name: string;
     lat: number;
     lng: number;
-    source: 'osm' | 'community' | 'survey';
+    source: 'osm' | 'community' | 'survey' | 'gtfs';
     source_ref: string;
     properties: Record<string, ObservationValue>;
     edge_id: number | null;
@@ -68,6 +68,9 @@ export interface WalkingNeeds {
     max_slope_pct: number;
     avoid_uncontrolled_crossings: boolean;
     avoid_uneven_surfaces: boolean;
+    min_clear_width_m: number | null;
+    require_tactile_crossings: boolean;
+    require_audible_crossings: boolean;
     verified_only: boolean;
     require_rests: boolean;
     rest_interval_min: number;
@@ -82,6 +85,7 @@ export interface WalkingNeeds {
 export const DEFAULT_NEEDS: WalkingNeeds = {
     step_free: false, max_slope_pct: 8, avoid_uncontrolled_crossings: false,
     avoid_uneven_surfaces: false, rest_backrest: false, rest_armrests: false, rest_shelter: false,
+    min_clear_width_m: null, require_tactile_crossings: false, require_audible_crossings: false,
     verified_only: false, require_rests: false, rest_interval_min: 5,
     rest_duration_min: 2, budget_min: 30, speed_mps: null,
 };

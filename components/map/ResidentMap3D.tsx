@@ -216,9 +216,10 @@ export default function ResidentMap3D({
         if (endLat !== undefined && endLng !== undefined) markers.push(pin(map, [endLat, endLng], 'destination', '●', 'Destination'));
         markers.push(pin(map, [startLat, startLng], 'origin', '●', startLabel));
         if (selectedLocation) markers.push(pin(map, selectedLocation, 'hazard', '+', 'Selected hazard location'));
+        if (focusLat !== undefined && focusLng !== undefined) markers.push(pin(map, [focusLat, focusLng], 'asset', '◎', 'Selected map point'));
         if (liveLocation) markers.push(pin(map, liveLocation, 'live', '●', 'Last recorded GPS position'));
         return () => { for (const marker of markers) marker.remove(); };
-    }, [loaded, assets, reports, startLat, startLng, startLabel, endLat, endLng, selectedLocation, liveLocation]);
+    }, [loaded, assets, reports, startLat, startLng, startLabel, endLat, endLng, selectedLocation, liveLocation, focusLat, focusLng]);
 
     useEffect(() => {
         const map = mapRef.current;

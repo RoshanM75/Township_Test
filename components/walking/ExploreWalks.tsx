@@ -35,8 +35,9 @@ export default function ExploreWalks({ nodes, edges, data, request, hazards, onC
         {!data ? <p className="tg-note">Load the walking data to explore facilities.</p> : candidates.length === 0 ? <p className="tg-note">No {FACILITY_LABELS[kind].toLowerCase()} have been mapped in this pilot yet. Try another facility type or return to planning.</p> : search.pending?<p className="tg-note" role="status">Checking nearby facilities and pedestrian routes…</p>:search.error?<p role="alert">{search.error}</p>:<>
             <label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" checked={unmatched} onChange={e => setUnmatched(e.target.checked)} className="h-5 w-5" />Show facilities without a matching route</label>
             {!items.some(i => i.route) && !unmatched && <p className="tg-note">No mapped {FACILITY_LABELS[kind].toLowerCase()} currently match your needs and budget. Show unmatched facilities to see why.</p>}
-            <ul className="space-y-3">{items.filter(i => i.route || unmatched).map(({ asset, route, note, reasons }) => <li key={asset.id} className="rounded-xl border-2 border-slate-200 p-3">
+            <ul className="space-y-3">{items.filter(i => i.route || unmatched).map(({ asset, route, note, details, reasons }) => <li key={asset.id} className="rounded-xl border-2 border-slate-200 p-3">
                 <h3 className="font-bold">{asset.name}</h3><p className="mt-1 text-sm">{note}</p>
+                <ul className="mt-1 space-y-1 text-xs text-slate-700">{details.map(detail => <li key={detail}>{detail}</li>)}</ul>
                 <p className="mt-1 text-sm">{route ? `${Math.ceil(route.total_min)} min including rests · ${Math.round(route.length_m)} m` : reasons[0] || 'No route meets the selected needs and current availability.'}</p>
                 <button className="tg-btn mt-3" disabled={!route} onClick={() => onChoose(asset)}>Review route to this facility</button>
             </li>)}</ul>

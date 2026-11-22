@@ -4,17 +4,10 @@ import { RequestError, validateReportId } from './validation.ts';
 import type { AssetKind, ObservationValue, PlaceCategory, VerificationRecord, VerificationTarget } from '../walking.ts';
 import { PILOTS, type PilotId } from '../pilots.ts';
 import { validateArea } from './pilots.ts';
+import { observationFields } from '../verification-fields.ts';
 
 const KINDS: AssetKind[] = ['destination', 'entrance', 'rest', 'shelter', 'toilet', 'water', 'transit'];
 const CATEGORIES: PlaceCategory[] = ['healthcare', 'food', 'park', 'community', 'shopping', 'transport', 'other'];
-const BOOLEAN_FIELDS = new Set(['path_open', 'has_steps', 'has_kerb_ramp', 'has_refuge', 'covered', 'available',
-    'step_free', 'path_connection', 'has_seat', 'wheelchair_space', 'sheltered', 'backrest', 'armrests', 'accessible_toilet', 'water_available']);
-const NUMBERS: Record<string, [number, number]> = { slope_pct: [0, 100], surface_rating: [1, 3], crossing_width_m: [0.1, 100],
-    ped_green_s: [0, 300], shade_morning: [0, 1], shade_midday: [0, 1], shade_afternoon: [0, 1], lit_ratio: [0, 1], connection_length_m: [0, 100] };
-const EDGE_FIELDS = new Set(['path_open', 'has_steps', 'has_kerb_ramp', 'has_refuge', 'covered', 'slope_pct', 'surface_rating',
-    'crossing_type', 'crossing_width_m', 'ped_green_s', 'shade_morning', 'shade_midday', 'shade_afternoon', 'lit_ratio']);
-const ASSET_FIELDS = new Set(['available', 'step_free', 'path_connection', 'has_seat', 'wheelchair_space', 'sheltered',
-    'backrest', 'armrests', 'accessible_toilet', 'water_available', 'opening_hours', 'connection_length_m']);
 
 function object(value: unknown): Record<string, unknown> {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RequestError('An object is required.');
@@ -25,17 +18,20 @@ function text(value: unknown, label: string, max: number, required = false): str
     if (typeof value !== 'string' || value.length > max || (required && !value.trim())) throw new RequestError(`${label} must be text${required ? ' and cannot be empty' : ''} (maximum ${max} characters).`);
     return value.trim();
 }
-function attributes(value: unknown, edge: boolean) {
+function attributes(value: unknown, target: VerificationTarget) {
     const input = object(value), output: Record<string, ObservationValue> = {};
+    const fields = new Map(observationFields(target).map(field => [field.key, field]));
     for (const [field, v] of Object.entries(input)) {
-        if (!(edge ? EDGE_FIELDS : ASSET_FIELDS).has(field)) throw new RequestError(`Unsupported observation: ${field}.`);
-        if (BOOLEAN_FIELDS.has(field)) {
+        const spec = fields.get(field);
+        if (!spec) throw new RequestError(`Unsupported observation: ${field}.`);
+        if (spec.kind === 'boolean') {
             if (typeof v !== 'boolean') throw new RequestError(`${field} must be true or false.`);
-        } else if (NUMBERS[field]) {
-            const [min, max] = NUMBERS[field];
+        } else if (spec.kind === 'number') {
+            const min = spec.percent ? 0 : spec.min ?? -Infinity;
+            const max = spec.percent ? 1 : spec.max ?? Infinity;
             if (typeof v !== 'number' || !Number.isFinite(v) || v < min || v > max || (field === 'surface_rating' && !Number.isInteger(v))) throw new RequestError(`${field} is out of range.`);
-        } else if (field === 'crossing_type') {
-            if (!['signalised', 'zebra', 'uncontrolled'].includes(String(v))) throw new RequestError('Choose a valid crossing type.');
+        } else if (spec.kind === 'choice') {
+            if (typeof v !== 'string' || !spec.options?.includes(v)) throw new RequestError(`Choose a valid value for ${field}.`);
         } else if (field === 'opening_hours') text(v, 'Opening hours', 100);
         output[field] = v as ObservationValue;
     }
@@ -68,7 +64,7 @@ export async function addAsset(body: unknown) {
     const parent = input.parent_id == null || input.parent_id === '' ? null : validateReportId(String(input.parent_id));
     if (kind === 'entrance' && !parent) throw new RequestError('An entrance must belong to a destination or transit stop.');
     if (kind !== 'entrance' && parent) throw new RequestError('Only entrances can have a parent destination.');
-    const properties = attributes(input.properties ?? {}, false);
+    const properties = attributes(input.properties ?? {}, kind === 'entrance' ? 'entrance' : 'facility');
     const client = await getPool().connect();
     try {
         await client.query('BEGIN');
@@ -106,7 +102,7 @@ export async function addVerification(body: unknown) {
     if (until !== null && (!Number.isFinite(until) || until <= observed || until > observed + 366 * 86400000)) throw new RequestError('The review date must be after the observation and within one year.');
     if (status === 'verified' && until === null) throw new RequestError('Verified observations need a review date.');
     const reviewer = text(input.reviewer, 'Auditor or team', 80, true), reference = text(input.source_ref, 'Source reference', 500), notes = text(input.notes, 'Notes', 2000);
-    const values = attributes(input.attributes, target === 'path' || target === 'crossing');
+    const values = attributes(input.attributes, target);
     if (!Object.keys(values).length) throw new RequestError('Record at least one observed condition.');
     const client = await getPool().connect();
     try {

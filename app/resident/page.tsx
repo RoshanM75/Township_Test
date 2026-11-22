@@ -10,7 +10,7 @@ import {
     AlertTriangle, Phone, MessageCircle, Copy, Volume2, Compass, Bookmark, Route as RouteIcon,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { loadGraph as fetchGraph, loadHazards, loadReports, submitReport, loadWalkingData, loadWeather,loadPilotContext } from '@/lib/api';
+import { loadGraph as fetchGraph, loadHazards, loadReports, submitReport, loadWalkingData, loadWeather, loadWeatherWarnings, loadPilotContext } from '@/lib/api';
 import { IS_PAGES_PREVIEW, sitePath } from '@/lib/site';
 import type { ReportMarker } from '@/lib/types';
 import { useClientReady } from '@/lib/use-client-ready';
@@ -56,6 +56,12 @@ import ResidentMap, { type MapMode } from '@/components/map/ResidentMap';
 import PanelGrip, { type PanelState } from '@/components/walking/PanelGrip';
 import { presetStartPoints, type StartPoint } from '@/lib/start-points';
 import WeatherStrip from '@/components/walking/WeatherStrip';
+import WeatherWarningList from '@/components/walking/WeatherWarnings';
+import TransitNearby from '@/components/walking/TransitNearby';
+import AccessNotices from '@/components/walking/AccessNotices';
+import { withMappedDetails } from '@/lib/pilot-walking-details';
+import { activeAccessNotices } from '@/lib/access-notices';
+import type { WeatherWarnings } from '@/lib/weather-warnings';
 import HazardPhotoInput from '@/components/resident/HazardPhotoInput';
 import { photoDescription, type PhotoReading } from '@/lib/photo-hazard';
 import './resident.css';
@@ -248,6 +254,7 @@ function ResidentPageContent() {
     const [reloadVersion, setReloadVersion] = useState(0);
 
     const [weather, setWeather] = useState<WalkingWeather | null>(null);
+    const [warningFeed, setWarningFeed] = useState<WeatherWarnings | null>(null);
     const [chosenMode, setChosenMode] = useState<Mode | null>(initialWalk.mode);
     const [step, setStep] = useState<Step>(initialWalk.fromLink||searchParams.get('destId') ? 'route' : 'where');
     const initialLibrary=boot.collection;
@@ -336,12 +343,14 @@ function ResidentPageContent() {
 
     /* ---------- Data ---------- */
     useEffect(() => {
+        let cancelled = false;
         async function refreshWeather() {
-            try {
-                setWeather(await loadWeather(area));
-            } catch {
-                setWeather(null);
-            }
+            const forecast = await loadWeather(area);
+            if (!cancelled) setWeather(forecast);
+        }
+        async function refreshWarnings() {
+            const feed = await loadWeatherWarnings(area);
+            if (!cancelled) setWarningFeed(feed);
         }
 
         async function loadGraph() {
@@ -349,31 +358,44 @@ function ResidentPageContent() {
                 const [graphData, hazardData, reportData, walking,context] = await Promise.all([
                     fetchGraph(area), loadHazards(area), loadReports('open',area), loadWalkingData(area),loadPilotContext(area),
                 ]);
+                if (cancelled) return;
+                const mapped = withMappedDetails(graphData.edges, { ...walking,
+                    area_id: area, dataset_id: walking.dataset_id ?? graphData.source.dataset_id }, context);
                 setPilotData(context);
                 if(!initialOriginUsed.current){setUserCoords(graphData.source.origin?.coordinates??context.origin.coordinates);initialOriginUsed.current=true;}
                 setNodes(graphData.nodes);
                 setNetworkSnapshot(graphData.source.snapshot_at ?? null);
-                setWalkingData({...walking,area_id:area,dataset_id:walking.dataset_id??graphData.source.dataset_id});
-                setEdges(graphData.edges);
+                setWalkingData(mapped.walking);
+                setEdges(mapped.edges);
                 setHazards(hazardData.hazards);
                 setReports(reportData.reports);
                 setDataError(false);
             } catch (error) {
-                console.error("Could not load pedestrian data:", error);
-                setDataError(true);
+                if (!cancelled) {
+                    console.error("Could not load pedestrian data:", error);
+                    setDataError(true);
+                }
             } finally {
-                setLoadingDb(false);
+                if (!cancelled) setLoadingDb(false);
             }
         }
 
         void refreshWeather();
+        void refreshWarnings();
         void loadGraph();
         const timer = window.setInterval(refreshWeather, 15 * 60 * 1000);
-        return () => window.clearInterval(timer);
+        const warningTimer = window.setInterval(refreshWarnings, 5 * 60 * 1000);
+        return () => {
+            cancelled = true;
+            window.clearInterval(timer);
+            window.clearInterval(warningTimer);
+        };
     }, [reloadVersion,area]);
 
     /* ---------- Routing ---------- */
     const planningTime = departure ?? planningNow;
+    const accessNotices = useMemo(() => activeAccessNotices(edges, sourceWalkingData, planningNow), [edges, sourceWalkingData, planningNow]);
+    const nearbyWeatherWarning = warningFeed?.warnings.some(warning => warning.mentions_area && warning.valid_to > planningNow);
     const walkingData = useMemo(() => sourceWalkingData ? withPersonalUpdates(sourceWalkingData, library.updates, planningTime) : null, [sourceWalkingData, library.updates, planningTime]);
     const slot: TimeSlot = slotForHour(malaysiaHour(planningTime));
     const isNight = slot === 'night';
@@ -396,7 +418,8 @@ function ResidentPageContent() {
         .sort((a,b)=>{const rank=(id:string)=>{const index=pilotData?.featured_ids.indexOf(id)??-1;return index<0?100:index;};return rank(a.id)-rank(b.id)||a.name.localeCompare(b.name);}),[places,searchTerm,pilotData]);
     const searchResults = matchingPlaces.slice(0, 8);
     const suggestedPlaces = (pilotData?.featured_ids ?? []).flatMap(id => places.find(place => place.id === id) ?? []).slice(0, 3);
-    const mapAssets=useMemo(()=>walkingData?.assets.filter(a=>['rest','toilet','water','shelter','transit'].includes(a.kind)||(a.kind==='entrance'&&a.parent_id===destination?.id))
+    const mapAssets=useMemo(()=>walkingData?.assets.filter(a=>(['rest','toilet','water','shelter','transit'].includes(a.kind) &&
+        (a.source!=='gtfs'||a.id===destination?.id))||(a.kind==='entrance'&&a.parent_id===destination?.id))
         .sort((a,b)=>metres([a.lng,a.lat],[userCoords[1],userCoords[0]])-metres([b.lng,b.lat],[userCoords[1],userCoords[0]])).slice(0,80)??[],[walkingData,destination,userCoords]);
     const recommended: Mode = plan?.recommended ?? (isNight ? 'safest' : 'coolest');
 
@@ -859,9 +882,15 @@ function ResidentPageContent() {
                 {view !== 'saved' && !pickingHazard && <PanelGrip state={panelState} walk={view === 'walk'} onChange={setPanelState} />}
                 <div id="walking-panel" className="tg-panel-body">
                 {libraryMessage && <div role="status" className="tg-note mb-3"><p>{libraryMessage}</p><button className="min-h-11 text-sm font-bold underline" onClick={() => setLibraryMessage(null)}>Dismiss message</button></div>}
-                {view === 'explore' && <ExploreWalks nodes={nodes} edges={edges} data={walkingData} request={toolRequest} hazards={hazards} onChoose={chooseFacility} onReturn={planReturn}
+                {!!accessNotices.length && <div className="mb-3"><AccessNotices notices={accessNotices} onFocus={focusWalkPoint} /></div>}
+                {nearbyWeatherWarning && (view !== 'plan' || step !== 'where') && <div className="mb-3"><WeatherWarningList feed={warningFeed} now={planningNow} /></div>}
+                {view === 'explore' && <div className="tg-stack">
+                    {pilotData && area !== 'elmina' && <TransitNearby context={pilotData} assets={walkingData?.assets ?? []} origin={userCoords} at={planningTime}
+                        onChoose={selectSearchResult} onFocus={focusWalkPoint} />}
+                    <ExploreWalks nodes={nodes} edges={edges} data={walkingData} request={toolRequest} hazards={hazards} onChoose={chooseFacility} onReturn={planReturn}
                     onLocate={handleGetLocation} locating={geoBusy} locationLabel={originLabel} locationMessage={geoMsg}
-                    onLastPosition={livePoint ? () => { setUserCoords(livePoint); setUsingGPS(true); setGeoMsg('Using your last recorded GPS fix. Refresh your location if you have moved since then.'); } : undefined} />}
+                    onLastPosition={livePoint ? () => { setUserCoords(livePoint); setUsingGPS(true); setGeoMsg('Using your last recorded GPS fix. Refresh your location if you have moved since then.'); } : undefined} />
+                    </div>}
                 {view === 'saved' && <SavedWalks library={library} profile={profile} pace={needs.speed_mps} onChange={changeLibrary} onReplan={replanPack} onFeedback={saveFeedback}
                     onUsePace={speed => { setNeeds(n => ({ ...n, speed_mps: speed })); setLibraryMessage('Your personal pace is selected for this walking profile.'); }} onShare={shareUpdate} />}
                 {view === 'walk' && !walkSession && <div className="tg-stack"><h1 className="tg-h2">Ready when you are</h1><p className="tg-small">Choose and review a route first. During the walk you can pause, optionally record GPS, and save how it felt.</p><button className="tg-btn tg-btn-primary" onClick={() => { setView('plan'); setStep('where'); }}>Plan a walk</button></div>}
@@ -872,6 +901,9 @@ function ResidentPageContent() {
                             {suggestedPlaces.map(place => <button key={place.id} type="button" onClick={() => selectSearchResult(place)}><MapPin size={15} aria-hidden />{place.name}</button>)}
                         </div>}
                         <WeatherStrip weather={weather} now={planningNow} />
+                        <WeatherWarningList feed={warningFeed} now={planningNow} />
+                        {pilotData && area !== 'elmina' && <TransitNearby context={pilotData} assets={walkingData?.assets ?? []} origin={userCoords} at={planningTime}
+                            onChoose={selectSearchResult} onFocus={focusWalkPoint} />}
                         <details className="tg-details">
                             <summary>Walking options and area data</summary>
                             <div className="tg-stack mt-3">
@@ -888,7 +920,7 @@ function ResidentPageContent() {
                                 <PlaceDiscovery snapshot={planningSnapshot} request={toolRequest} budget={needs.budget_min} onChoose={selectSearchResult} />
                                 <button type="button" className="tg-text-action text-left" onClick={() => setReloadVersion(version => version + 1)}>Refresh paths and checks</button>
                                 <Link href={`/verification?area=${area}`} className="inline-flex min-h-11 items-center font-bold underline">Places and verification coverage</Link>
-                                <PilotSources area={area} context={pilotData??undefined} onFocus={focusWalkPoint} />
+                                <PilotSources area={area} context={pilotData??undefined} />
                             </div>
                         </details>
                     </div>
@@ -939,7 +971,9 @@ function ResidentPageContent() {
                                 {!returning && entrances.length > 0 && <label className="tg-label">Arrival access point
                                     <select className="tg-input" value={entranceId} onChange={event => { setEntranceId(event.target.value); setChosenMode(null); }}>
                                         <option value="">Best available access point</option>
-                                        {entrances.map(entrance => <option key={entrance.id} value={entrance.id}>{entrance.name}</option>)}
+                                        {entrances.filter(entrance => entrance.edge_id !== null).map(entrance => <option key={entrance.id} value={entrance.id}>
+                                            {entrance.name}{entrance.properties.osm_wheelchair === 'yes' ? ' · wheelchair access mapped' : ''}
+                                        </option>)}
                                     </select>
                                 </label>}
                                 {activeRoute && <>

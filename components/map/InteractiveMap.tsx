@@ -434,6 +434,7 @@ export default function InteractiveMap({
                     </Polyline>;
                 })}
                 {selectedLocation && <Marker position={selectedLocation} icon={assetIcon('selection')}><Popup>Selected mapping position</Popup></Marker>}
+                {focusLocation && <Marker position={focusLocation} icon={assetIcon('selection')}><Popup>Selected map point</Popup></Marker>}
                 {assets.filter(a => a.kind !== 'destination').map(asset => <Marker key={`asset:${asset.id}`} position={[asset.lat, asset.lng]} icon={assetIcon(asset.kind)}>
                     <Tooltip>{asset.name}</Tooltip>
                     <Popup><strong>{asset.name}</strong><p>{asset.kind === 'rest' ? 'Mapped seating / rest facility' : asset.kind === 'entrance' ? 'Mapped access point' : asset.kind}</p><p>Source: {asset.source}. See route details and verification records for current checks.</p></Popup>
