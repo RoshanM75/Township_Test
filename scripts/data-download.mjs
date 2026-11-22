@@ -56,7 +56,7 @@ export async function* csvFile(path){
 
 export async function gtfsFiles(zipPath,bounds=null){
     const {stdout}=await execute('python',['-c',`import zipfile,json,sys,csv,io
-allowed={'stops.txt','routes.txt','trips.txt','stop_times.txt','calendar.txt','calendar_dates.txt','feed_info.txt','agency.txt'}
+allowed={'stops.txt','routes.txt','trips.txt','stop_times.txt','calendar.txt','calendar_dates.txt','feed_info.txt','agency.txt','frequencies.txt'}
 bounds=json.loads(sys.argv[2]);result={}
 with zipfile.ZipFile(sys.argv[1]) as z:
  total=sum(i.file_size for i in z.infolist())
@@ -69,8 +69,17 @@ with zipfile.ZipFile(sys.argv[1]) as z:
   s,w,n,e=bounds
   result['stops.txt']=[r for r in result['stops.txt'] if r.get('stop_lat') and r.get('stop_lon') and s<=float(r['stop_lat'])<=n and w<=float(r['stop_lon'])<=e]
  ids={r['stop_id'] for r in result['stops.txt']}
+ origins={}
+ frequency_trips={r['trip_id'] for r in result.get('frequencies.txt',[])}
+ result['stop_times.txt']=[]
  with z.open('stop_times.txt') as f:
-  result['stop_times.txt']=[r for r in csv.DictReader(io.TextIOWrapper(f,encoding='utf-8-sig')) if r['stop_id'] in ids]
+  for r in csv.DictReader(io.TextIOWrapper(f,encoding='utf-8-sig')):
+   if r['stop_id'] in ids: result['stop_times.txt'].append(r)
+   if r['trip_id'] in frequency_trips and r.get('stop_sequence','').isdigit():
+    seq=int(r['stop_sequence'])
+    if r['trip_id'] not in origins or seq<origins[r['trip_id']][0]:
+     origins[r['trip_id']]=(seq,r.get('departure_time') or r.get('arrival_time'))
+ result['trip_origins']=[{'trip_id':trip,'time':date[1]} for trip,date in origins.items()]
  print(json.dumps(result))`,zipPath,JSON.stringify(bounds)],{maxBuffer:200000000});
     return JSON.parse(stdout);
 }

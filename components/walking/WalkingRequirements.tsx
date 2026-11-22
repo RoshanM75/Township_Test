@@ -14,6 +14,8 @@ export default function WalkingRequirements({ needs, profile, onChange }: { need
                     ['step_free', 'Step-free paths and access points'],
                     ['avoid_uncontrolled_crossings', 'Use controlled or marked crossings'],
                     ['avoid_uneven_surfaces', 'Avoid uneven or broken surfaces'],
+                    ['require_tactile_crossings', 'Require tactile paving at crossings'],
+                    ['require_audible_crossings', 'Require audible pedestrian signals at crossings'],
                     ['verified_only', 'Require current checks for critical conditions'],
                     ['require_rests', 'I need regular, verified rest facilities'],
                 ] as const).map(([key, label]) => <label key={key} className="flex min-h-11 items-center gap-3">
@@ -35,6 +37,13 @@ export default function WalkingRequirements({ needs, profile, onChange }: { need
                             {needs.speed_mps !== null && ![.5,.7,1,1.3].includes(needs.speed_mps) && <option value={needs.speed_mps}>Personal pace: {needs.speed_mps} m/s</option>}
                         </select>
                     </label>
+                    <label htmlFor={`${id}-width`}>Minimum clear path width
+                        <select id={`${id}-width`} className="mt-1 min-h-11 w-full rounded border border-slate-400 bg-white px-2"
+                            value={needs.min_clear_width_m ?? ''} onChange={e => set('min_clear_width_m', e.target.value ? Number(e.target.value) : null)}>
+                            <option value="">No minimum</option>
+                            {[.75, .9, 1, 1.2, 1.5, 1.8, 2].map(width => <option key={width} value={width}>{width} m</option>)}
+                        </select>
+                    </label>
                 </div>
                 {needs.require_rests && <div className="grid grid-cols-2 gap-3">
                     <label htmlFor={`${id}-interval`}>Rest at least every
@@ -51,7 +60,7 @@ export default function WalkingRequirements({ needs, profile, onChange }: { need
                 {needs.require_rests && <div className="space-y-1">{([
                     ['rest_backrest','Seat needs a backrest'], ['rest_armrests','Seat needs armrests'], ['rest_shelter','Rest facilities need shelter'],
                 ] as const).map(([key,label]) => <label key={key} className="flex min-h-11 items-center gap-3"><input type="checkbox" className="h-5 w-5" checked={needs[key]} onChange={e => set(key,e.target.checked)} />{label}</label>)}</div>}
-                <p className="text-xs leading-relaxed text-slate-600">Choose what is comfortable for you. Estimates include walking, crossing waits and planned rests. Only currently checked rest facilities fulfil a required rest interval.</p>
+                <p className="text-xs leading-relaxed text-slate-600">Width, tactile paving and audible signals have limited map coverage. A selected requirement excludes paths or crossings with missing matching information. Required rests use current facility checks.</p>
             </div>
         </details>
     );

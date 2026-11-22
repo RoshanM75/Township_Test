@@ -58,7 +58,7 @@ export default function ResidentMap({
                             <option value="routes">Routes</option>
                             <option value="paths">Footpaths</option>
                             <option value="cover">Roof cover</option>
-                            <option value="shade">Shade</option>
+                            <option value="shade">Shade estimates and checks</option>
                             <option value="lighting">Lighting</option>
                             <option value="observations">Field checks</option>
                         </select>
@@ -68,7 +68,7 @@ export default function ResidentMap({
                 {failed && <p role="status" className="tg-map-status">3D is unavailable on this device.</p>}
                 {informationLayer !== 'routes' && <p role="status" className="tg-map-status">
                     {informationLayer === 'paths' ? `${coverage.total} mapped paths`
-                        : `${coverage.known} of ${coverage.total} paths with data · dashed gray means unknown`}
+                        : `${coverage.known} of ${coverage.total} paths with data${coverage.modelled ? ` · ${coverage.modelled} estimated` : ''} · dashed gray means unknown`}
                 </p>}
             </div>
         </div>

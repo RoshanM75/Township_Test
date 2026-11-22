@@ -2,7 +2,7 @@
 
 The primary area is **Pasar Seni–Chinatown–Masjid Jamek**. The original two Elmina bridge destinations remain a separate, labelled example. Use the Walking area selector, `/resident?area=pasar-seni` or `/resident?area=elmina`; old links containing an Elmina bridge identifier still open the example.
 
-The first real OSM and DOSM source files are now included. See the [source assessment and coverage counts](../data/pasar-seni/README.md). Use `npm run data:rebuild` to reproduce this version from the compressed original downloads, without external data requests. Additional transit, demand, Wikidata and satellite feeds remain explicitly not loaded.
+The real OSM and DOSM source files are included. See the [source assessment and coverage counts](../data/pasar-seni/README.md). Use `npm run data:rebuild` to reproduce the base snapshot from compressed original downloads. A separate walking-details snapshot adds dated GTFS timetables, mapped access and facility facts, Wikidata links and shade estimates. See [source update commands](pilot-walking-details.md).
 
 ## Source acquisition
 
@@ -64,4 +64,4 @@ Place search uses imported names locally, without a public geocoder/autocomplete
 
 Automated tests use **clearly labelled synthetic fixtures in temporary directories/databases**, separate from production source files. They check entrance associations, direction restrictions, disconnected networks, CSV/GTFS parsing, population units, source privacy and cross-area writes. Existing Elmina routes remain tested against the actual included OSM snapshot.
 
-The included real KL bundle enables the pilot as the Pages default. Tests exercise actual landmark routes, source/archive hashes, mapped venue hours, unverified rests and district population units, alongside the isolated synthetic edge cases. Optional external feeds remain not loaded until acquired. If a future checkout lacks the KL bundle, Pages can still deploy the actual Elmina example: KL is labelled data pending and disabled, and explicit KL links explain its status without requesting missing files. Malformed or private source data still stops the build. Never deploy synthetic test fixtures as the pilot. Local `--example-only` validation remains available and is refused in GitHub Actions.
+The included real KL bundle enables the pilot as the Pages default. Tests exercise actual landmark routes, source/archive hashes, mapped venue hours, unverified rests and district population units, alongside the isolated synthetic edge cases. If a future checkout lacks the KL bundle, Pages can still deploy the actual Elmina example. KL is labelled data pending and disabled, and explicit KL links explain its status. Malformed or private source data still stops the build. Local `--example-only` validation remains available and is refused in GitHub Actions.

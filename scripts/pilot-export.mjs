@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdir,writeFile,readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { pointInPilot } from '../lib/pilots.ts';
 import { gisLayers } from './pilot-snapshot.mjs';
 
@@ -9,7 +9,66 @@ export async function loadPagesPilot(path,area='pasar-seni'){
     let contents;
     try{contents=await readFile(path,'utf8');}
     catch(error){if(error.code==='ENOENT')return null;throw error;}
-    const bundle=JSON.parse(contents);validatePilotSnapshot(bundle,area);return bundle;
+    const bundle=JSON.parse(contents);
+    validatePilotSnapshot(bundle,area);
+    let supplement;
+    try { supplement=JSON.parse(await readFile(resolve(dirname(path),'walking-details.json'),'utf8')); }
+    catch(error){if(error.code==='ENOENT')return bundle;throw error;}
+    if(supplement.area_id!==area)throw Error('Walking details belong to another area.');
+    if(supplement.dataset_id!==bundle.context.dataset_id){
+        console.warn(`${area}: imported walking details are for an older graph. Run npm run data:details to rebuild them.`);
+        return bundle;
+    }
+    return attachPilotDetails(bundle,supplement);
+}
+
+export function attachPilotDetails(bundle,supplement){
+    assert.equal(supplement.dataset_id,bundle.context.dataset_id);
+    assert.equal(supplement.area_id,bundle.area_id);
+    const {context,entrances}=supplement;
+    const {walking_details,transit,demand,demographics,landmarks,environment}=context;
+    const paths=new Set(bundle.graph.edges.map(edge=>String(edge.id)));
+    const assets=new Set(bundle.walking.assets.map(asset=>asset.id));
+    for(const [id,fields] of Object.entries(walking_details.paths)){
+        assert.ok(paths.has(id),'Mapped path details reference another dataset.');
+        for(const [field,value] of Object.entries(fields)){
+            const valid=field==='shade_source'?value==='modelled':
+                ['has_tactile','audible_signal'].includes(field)?typeof value==='boolean':
+                field==='clear_width_m'?Number.isFinite(value)&&value>=.1&&value<=30:
+                ['shade_morning','shade_midday','shade_afternoon'].includes(field)&&Number.isFinite(value)&&value>=0&&value<=1;
+            assert.ok(valid,`Invalid mapped path detail: ${field}.`);
+        }
+    }
+    for(const [id,fields] of Object.entries(walking_details.facilities)){
+        assert.ok(assets.has(id),'Mapped facility details reference another dataset.');
+        for(const [field,value] of Object.entries(fields)){
+            const valid=field==='clear_width_m'?Number.isFinite(value)&&value>=.1&&value<=30:
+                ['accessible_toilet','water_available','armrests','backrest','step_free'].includes(field)&&typeof value==='boolean';
+            assert.ok(valid,`Invalid mapped facility detail: ${field}.`);
+        }
+    }
+    const stationIds = new Set(bundle.walking.assets.filter(asset => asset.kind === 'transit').map(asset => asset.id));
+    const supplemental = entrances.filter(asset=>{
+        assert.ok(asset.kind==='entrance'&&stationIds.has(asset.parent_id),'An added station entrance requires a mapped parent.');
+        return !assets.has(asset.id);
+    });
+    for (const stop of transit.stops) {
+        assert.ok(pointInPilot([stop.lat,stop.lng],bundle.area_id),'A transit stop is outside this pilot.');
+        if(stop.walking_asset_id)assert.ok(stationIds.has(stop.walking_asset_id),'A stop references an unknown station.');
+        if(stop.approach)assert.ok(paths.has(String(stop.approach.edge_id))
+            &&pointInPilot([stop.approach.lat,stop.approach.lng],bundle.area_id)
+            &&Number.isFinite(stop.approach.fraction)&&stop.approach.fraction>=0&&stop.approach.fraction<=1
+            &&Number.isFinite(stop.approach.distance_m)&&stop.approach.distance_m>=0&&stop.approach.distance_m<=8,
+        'An approximate transit approach needs a nearby mapped footpath.');
+    }
+    const sources=[...new Map([...bundle.context.sources,...context.sources].map(source=>[source.id,source])).values()];
+    const coverage={...bundle.context.coverage,entrances:bundle.context.coverage.entrances+supplemental.length,
+        unconnected_places:bundle.context.coverage.unconnected_places+supplemental.filter(asset=>asset.edge_id===null).length};
+    const enriched={...bundle,supplemental_assets:supplemental,
+        walking:{...bundle.walking,assets:[...bundle.walking.assets,...supplemental]},
+        context:{...bundle.context,walking_details,transit,demand,demographics,landmarks,environment,sources,coverage}};
+    validatePilotSnapshot(enriched,bundle.area_id);
+    return enriched;
 }
 
 export function pagesPilotMetadata(kl,um){

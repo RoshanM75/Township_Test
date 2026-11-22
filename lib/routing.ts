@@ -22,6 +22,9 @@ export interface PathNode {
 }
 
 export interface PathEdge {
+    has_tactile?: boolean | null;
+    audible_signal?: boolean | null;
+    clear_width_m?: number | null;
     foot_direction?: 'both' | 'forward' | 'backward';
     id: number;
     from_node: number;

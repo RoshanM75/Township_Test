@@ -5,8 +5,11 @@ const PATH_FIELDS: ObservationField[] = [
     { key: 'has_steps', label: 'Steps are present', kind: 'boolean' },
     { key: 'surface_rating', label: 'Surface: 1 smooth, 2 uneven, 3 broken', kind: 'number', min: 1, max: 3 },
     { key: 'slope_pct', label: 'Measured slope (%)', kind: 'number', min: 0, max: 100 },
+    { key: 'clear_width_m', label: 'Narrowest clear path width (metres)', kind: 'number', min: .1, max: 30 },
     { key: 'crossing_type', label: 'Crossing type', kind: 'choice', options: ['signalised', 'zebra', 'uncontrolled'], crossingOnly: true },
     { key: 'has_kerb_ramp', label: 'Kerb ramps are present', kind: 'boolean', crossingOnly: true },
+    { key: 'has_tactile', label: 'Tactile paving is present', kind: 'boolean', crossingOnly: true },
+    { key: 'audible_signal', label: 'Audible pedestrian signal is working', kind: 'boolean', crossingOnly: true },
     { key: 'crossing_width_m', label: 'Crossing width (metres)', kind: 'number', min: .1, max: 100, crossingOnly: true },
     { key: 'ped_green_s', label: 'Pedestrian green phase (seconds)', kind: 'number', min: 0, max: 300, crossingOnly: true },
     { key: 'has_refuge', label: 'Crossing refuge is present', kind: 'boolean', crossingOnly: true },
@@ -20,6 +23,7 @@ const ASSET_FIELDS: ObservationField[] = [
     { key: 'available', label: 'Access point or facility is available', kind: 'boolean' },
     { key: 'path_connection', label: 'Physical connection to the mapped footpath checked', kind: 'boolean' },
     { key: 'step_free', label: 'Connection and access point are step-free', kind: 'boolean' },
+    { key: 'clear_width_m', label: 'Clear width at the access point (metres)', kind: 'number', min: .1, max: 30 },
     { key: 'has_seat', label: 'Usable seating is present', kind: 'boolean' },
     { key: 'wheelchair_space', label: 'Level space for a wheelchair to rest', kind: 'boolean' },
     { key: 'sheltered', label: 'Shelter is present', kind: 'boolean' },
@@ -31,5 +35,8 @@ const ASSET_FIELDS: ObservationField[] = [
     { key: 'connection_length_m', label: 'Measured connection length (metres)', kind: 'number', min: 0, max: 100 },
 ];
 export function observationFields(target: VerificationTarget) {
-    return target === 'path' || target === 'crossing' ? PATH_FIELDS.filter(f => !f.crossingOnly || target === 'crossing') : ASSET_FIELDS;
+    if (target === 'path' || target === 'crossing') return PATH_FIELDS.filter(f => !f.crossingOnly || target === 'crossing');
+    return target === 'entrance' ? [...ASSET_FIELDS, {
+        key: 'lift_available', label: 'Lift required for step-free access is working', kind: 'boolean',
+    } satisfies ObservationField] : ASSET_FIELDS;
 }
