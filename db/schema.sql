@@ -204,3 +204,29 @@ CREATE INDEX IF NOT EXISTS idx_community_routes_area_status ON community_routes(
 
 ALTER TABLE community_routes ADD COLUMN IF NOT EXISTS opening_hours TEXT;
 ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS dismissed_at TIMESTAMPTZ;
+
+-- Ownership is recorded against exact pilot targets. Existing cases keep their assigned team.
+CREATE TABLE IF NOT EXISTS maintenance_responsibilities (
+    area_id TEXT NOT NULL CHECK (area_id IN ('elmina','pasar-seni','um-campus')),
+    target_type TEXT NOT NULL CHECK (target_type IN ('edge','asset')),
+    target_id BIGINT NOT NULL,
+    team TEXT NOT NULL CHECK (char_length(team) BETWEEN 1 AND 120),
+    reference TEXT NOT NULL CHECK (char_length(reference) BETWEEN 1 AND 300),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (area_id,target_type,target_id)
+);
+
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS due_on DATE;
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS work_order_ref TEXT;
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS assignment_version INTEGER NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS maintenance_assignments (
+    report_id BIGINT NOT NULL REFERENCES defect_reports(id),
+    version INTEGER NOT NULL CHECK (version > 0),
+    team TEXT,
+    due_on DATE,
+    work_order_ref TEXT,
+    source TEXT NOT NULL CHECK (source IN ('responsibility','review','manual')),
+    assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (report_id,version)
+);

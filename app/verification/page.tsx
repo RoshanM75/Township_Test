@@ -20,7 +20,7 @@ const Map = dynamic(() => import('@/components/map/InteractiveMap'), { ssr: fals
 const control = 'mt-1 min-h-11 w-full rounded-lg border border-slate-400 bg-white px-3 py-2 text-slate-900';
 const button = 'min-h-11 rounded-xl bg-[#A4262C] px-4 py-3 font-bold text-white disabled:opacity-50';
 
-function VerificationWorkspace({area}:{area:PilotId}) {
+function VerificationWorkspace({ area, initialTarget, initialType }: { area: PilotId; initialTarget: string; initialType: VerificationTarget }) {
     const router=useRouter();
     const [reviewerKey, setReviewerKey] = useReviewerKey();
     const [data, setData] = useState<WalkingData | null>(null);
@@ -29,8 +29,8 @@ function VerificationWorkspace({area}:{area:PilotId}) {
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
     const [busy, setBusy] = useState(false);
-    const [target, setTarget] = useState<VerificationTarget>('path');
-    const [targetId, setTargetId] = useState('');
+    const [target, setTarget] = useState<VerificationTarget>(initialType);
+    const [targetId, setTargetId] = useState(initialTarget);
     const [status, setStatus] = useState('reported');
     const [method, setMethod] = useState('site_visit');
     const [reviewer, setReviewer] = useState('');
@@ -146,4 +146,11 @@ export default function VerificationPage() {
     const ready = useClientReady();
     return ready ? (IS_PAGES_PREVIEW ? <VerificationPreview /> : <Suspense fallback={<p role="status">Loading area…</p>}><WorkspaceWithParams/></Suspense>) : <main className="p-6" role="status">Loading verification workspace…</main>;
 }
-function WorkspaceWithParams(){const params=useSearchParams();return <VerificationWorkspace key={params.toString()} area={pilotFromParams(params)}/>;}
+function WorkspaceWithParams() {
+    const params = useSearchParams();
+    const type = params.get('type');
+    const target = params.get('target') ?? '';
+    const initialType = type === 'crossing' || type === 'entrance' || type === 'facility' ? type : 'path';
+    return <VerificationWorkspace key={params.toString()} area={pilotFromParams(params)} initialType={initialType}
+        initialTarget={/^[1-9]\d{0,17}$/.test(target) ? target : ''} />;
+}

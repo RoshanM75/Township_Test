@@ -26,6 +26,9 @@ export interface MaintenanceDefect extends ReportMarker {
     dismissed_at?: string | null;
     responsible_team?: string | null;
     review_note?: string | null;
+    due_on?: string | null;
+    work_order_ref?: string | null;
+    assignment_version?: number;
 }
 
 export interface RouteProperties {

@@ -22,12 +22,10 @@ import { reportStatus } from '@/lib/report-status';
 import type { FormEvent } from 'react';
 import PilotSources from '@/components/walking/PilotSources';
 import PilotUnavailable from '@/components/walking/PilotUnavailable';
-import {
-    rankInterventions,
-    estimateDefectCost,
-    type Intervention,
-    type RankedIntervention
-} from '@/lib/scoring';
+import { isOverdue, malaysiaDate, rankOpenCases, reportTarget } from '@/lib/operator';
+import ActivityPanel from '@/components/operator/ActivityPanel';
+import TargetsPanel from '@/components/operator/TargetsPanel';
+import AssignmentEditor from '@/components/operator/AssignmentEditor';
 
 const InteractiveMap = dynamic(() => import('@/components/map/InteractiveMap'), { ssr: false });
 
@@ -36,6 +34,7 @@ const POLL_MS = 30_000;
 type Kind = 'shade' | 'light' | 'ramp' | 'crossing';
 type Filter = 'all' | Kind;
 type SortBy = 'priority' | 'recent';
+type Section = 'cases' | 'activity' | 'targets';
 type Notice = { tone: 'ok' | 'warn' | 'error'; text: string };
 
 const KIND_META: Record<Kind, { label: string; Icon: LucideIcon; tone: string }> = {
@@ -108,12 +107,18 @@ function DashboardWithParams(){const params=useSearchParams(),area=pilotFromPara
 function DashboardWorkspace({area}:{area:PilotId}) {
     const router=useRouter();
     const [reviewerKey, setReviewerKey] = useReviewerKey();
+    const operatorKey = IS_PAGES_PREVIEW ? '' : reviewerKey;
+    const [section, setSection] = useState<Section>('cases');
+    const [focusTarget, setFocusTarget] = useState<NonNullable<ReturnType<typeof reportTarget>>>();
+    const [teamFilter, setTeamFilter] = useState('');
+    const [overdueOnly, setOverdueOnly] = useState(false);
+    const [caseStatus, setCaseStatus] = useState('all');
     const [reviewTeam, setReviewTeam] = useState('');
     const [reviewNote, setReviewNote] = useState('');
     const [defects, setDefects] = useState<MaintenanceDefect[]>([]);
     const [loading, setLoading] = useState(true);
-    const [dataCounts, setDataCounts] = useState({ places: 0, observations: 0 });
-    const [loadError, setLoadError] = useState(false);
+    const [dataCounts, setDataCounts] = useState({ places: 0 });
+    const [loadError, setLoadError] = useState('');
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
     const [sortBy, setSortBy] = useState<SortBy>('priority');
@@ -130,26 +135,26 @@ function DashboardWorkspace({area}:{area:PilotId}) {
     const [refreshVersion, setRefreshVersion] = useState(0);
 
     useEffect(() => {
+        let cancelled = false;
         async function loadData(silent = false) {
             try {
-                const [{ reports }, walking] = await Promise.all([loadReports('open',area), loadWalkingData(area)]);
+                const [{ reports }, walking] = await Promise.all([loadReports('open', area, operatorKey), loadWalkingData(area)]);
+                if (cancelled) return;
                 setDefects(reports);
-                setDataCounts({ places: walking.assets.filter(a => ['destination','transit'].includes(a.kind)).length, observations: walking.verifications.length });
-                setLoadError(false);
+                setDataCounts({ places: walking.assets.filter(a => ['destination','transit'].includes(a.kind)).length });
+                setLoadError('');
                 setLastUpdated(new Date());
             } catch (err) {
-                console.error('Error fetching admin dashboard data:', err);
-                setLoadError(true);
+                if (!cancelled) setLoadError(err instanceof Error ? err.message : 'The report queue could not be loaded.');
             } finally {
-                if (!silent) setLoading(false);
+                if (!cancelled && !silent) setLoading(false);
             }
         }
 
         void loadData();
-        if (IS_PAGES_PREVIEW) return;
-        const timer = setInterval(() => void loadData(true), POLL_MS);
-        return () => clearInterval(timer);
-    }, [refreshVersion,area]);
+        const timer = IS_PAGES_PREVIEW ? undefined : setInterval(() => void loadData(true), POLL_MS);
+        return () => { cancelled = true; clearInterval(timer); };
+    }, [refreshVersion, area, operatorKey]);
 
     // Notices fade away on their own
     useEffect(() => {
@@ -180,71 +185,37 @@ function DashboardWorkspace({area}:{area:PilotId}) {
         return m;
     }, [defects]);
 
-    const awaitingEstimate = defects.filter(report => report.estimated_cost_rm === 0);
-    const interventions: Intervention[] = useMemo(() => {
-        return defects.filter(report => report.estimated_cost_rm !== 0).map((d) => {
-            const isBlocker = d.severity === 'blocker' || d.category === 'Access Barrier' || d.category === 'Universal Design';
-            const kind = d.category === 'Shade Infrastructure' ? 'shade'
-                : d.category === 'Safety Electrical' ? 'light'
-                    : d.category === 'Universal Design' ? 'ramp' : 'crossing';
-
-            const cost = d.estimated_cost_rm ?? estimateDefectCost(kind, 20);
-
-            return {
-                id: String(d.id),
-                label: d.description || d.category,
-                kind,
-                cost_rm: cost,
-                users_low: 400,
-                users_high: 1200,
-                trips_per_week: 14,
-                severity: isBlocker ? 'blocker' : 'comfort',
-                exposure_per_trip: isBlocker ? 1 : 120,
-            };
-        });
-    }, [defects]);
-
-    // Highest priority first. The rank number stays the same whatever the sort or filter, so table and map always agree.
-    const rankedAll: RankedIntervention[] = useMemo(
-        () => (interventions.length === 0 ? [] : rankInterventions(interventions)),
-        [interventions],
-    );
-
-    const rankOf = useMemo(() => {
-        const m = new Map<string, number>();
-        rankedAll.forEach((item, i) => m.set(String(item.id), i + 1));
-        return m;
-    }, [rankedAll]);
-
-    const maxScore = useMemo(
-        () => (rankedAll.length === 0 ? 1 : Math.max(...rankedAll.map((i) => i.score_mid)) || 1),
-        [rankedAll],
-    );
-
-    const hasDates = useMemo(() => defects.some((d) => d.created_at), [defects]);
-
+    const today = lastUpdated ? malaysiaDate(lastUpdated.toISOString()) : '';
+    const rankedAll = useMemo(() => rankOpenCases(defects, today).map(({ report, count }, index) => ({
+        id: String(report.id), rank: index + 1, count, label: report.description || report.category,
+        kind: (report.category === 'Shade Infrastructure' ? 'shade' : report.category === 'Safety Electrical' ? 'light'
+            : ['Access Barrier', 'Universal Design'].includes(report.category) ? 'ramp' : 'crossing') as Kind,
+        severity: report.severity ?? 'comfort',
+    })), [defects, today]);
     const kindCounts = useMemo(() => {
         const counts: Record<Kind, number> = { shade: 0, light: 0, ramp: 0, crossing: 0 };
-        rankedAll.forEach((i) => { counts[i.kind as Kind] = (counts[i.kind as Kind] ?? 0) + 1; });
+        rankedAll.forEach(item => { counts[item.kind]++; });
         return counts;
     }, [rankedAll]);
+    const teams = [...new Set(defects.flatMap(report => report.responsible_team ? [report.responsible_team] : []))].sort();
+    const visibleItems = useMemo(() => {
+        const list = rankedAll.filter(item => {
+            const report = defectById.get(item.id)!;
+            return (filter === 'all' || item.kind === filter) &&
+                (!teamFilter || (report.responsible_team ? `team:${report.responsible_team}` : 'unassigned') === teamFilter) &&
+                (!overdueOnly || isOverdue(report, today)) &&
+                (caseStatus === 'all' || (report.checked_at ? 'checked' : 'reported') === caseStatus);
+        });
+        if (sortBy === 'priority') return list;
+        return list.sort((a, b) => (defectById.get(b.id)?.created_at ?? '').localeCompare(defectById.get(a.id)?.created_at ?? ''));
+    }, [rankedAll, defectById, filter, teamFilter, overdueOnly, caseStatus, sortBy, today]);
 
-    const visibleItems: RankedIntervention[] = useMemo(() => {
-        const list = filter === 'all' ? rankedAll : rankedAll.filter((i) => i.kind === filter);
-        if (sortBy === 'priority' || !hasDates) return list;
-        const stamp = (id: string | number) => Date.parse(defectById.get(String(id))?.created_at ?? '') || 0;
-        return [...list].sort((a, b) => stamp(b.id) - stamp(a.id));
-    }, [rankedAll, filter, sortBy, hasDates, defectById]);
-
-    /* ---------------- KPIs (all open defects, not just the filtered ones) ---------------- */
-
-    const metrics = useMemo(() => {
-        return {
-            open: defects.length,
-            blockers: defects.filter(report => report.severity === 'blocker').length,
-            cost: rankedAll.reduce((acc, i) => acc + i.cost_rm, 0),
-        };
-    }, [defects, rankedAll]);
+    const metrics = {
+        open: defects.length,
+        blockers: defects.filter(report => report.severity === 'blocker').length,
+        cost: defects.reduce((total, report) => total + (report.estimated_cost_rm ?? 0), 0),
+        unassigned: defects.filter(report => !report.responsible_team).length,
+    };
 
     /* ---------------- Selection and map ---------------- */
 
@@ -269,13 +240,13 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                 id: String(item.id),
                 lat: Number(lat),
                 lng: Number(lng),
-                rank: rankOf.get(String(item.id)) ?? 0,
+                rank: item.rank,
                 severity: item.severity as 'blocker' | 'comfort',
                 title: item.label,
                 detail: d?.location_name ?? undefined,
             }];
         });
-    }, [visibleItems, defectById, rankOf]);
+    }, [visibleItems, defectById]);
 
     function selectRow(id: string | number) {
         const key = String(id);
@@ -287,8 +258,9 @@ function DashboardWorkspace({area}:{area:PilotId}) {
     // Keep the chosen row in view when it was picked from the map
     useEffect(() => {
         if (!selectedId) return;
-        document.getElementById(`row-${selectedId}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    }, [selectedId]);
+        const target = window.matchMedia('(max-width: 1023px)').matches ? 'case-details' : `row-${selectedId}`;
+        document.getElementById(target)?.scrollIntoView({ block: 'nearest' });
+    }, [selectedId, section]);
 
     /* ---------------- Mark fixed ---------------- */
 
@@ -307,6 +279,7 @@ function DashboardWorkspace({area}:{area:PilotId}) {
         try {
             await markReportFixed(id, area, reviewerKey);
             setDefects((prev) => prev.filter((d) => String(d.id) !== id));
+            setRefreshVersion(value => value + 1);
             setSelectedId((cur) => (cur === id ? null : cur));
             setNotice({ tone: 'ok', text: 'Marked as fixed.' });
         } catch (err) {
@@ -323,10 +296,12 @@ function DashboardWorkspace({area}:{area:PilotId}) {
         setFixingId(id);
         const dismiss = ((event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null)?.value === 'dismiss';
         try {
-            const { report } = await checkReport(id, area, reviewerKey, { team: reviewTeam, note: reviewNote, dismiss });
+            const { report } = await checkReport(id, area, reviewerKey,
+                { team: defectById.get(id)?.responsible_team || reviewTeam, note: reviewNote, dismiss });
             setDefects(previous => dismiss ? previous.filter(item => String(item.id) !== id)
                 : previous.map(item => String(item.id) === id ? report : item));
             setReviewNote('');
+            setRefreshVersion(value => value + 1);
             setNotice({ tone: 'ok', text: dismiss ? 'Report reviewed and dismissed.' : 'Report checked and assigned.' });
         } catch (error) { setNotice({ tone: 'error', text: error instanceof Error ? error.message : 'Could not check the report.' }); }
         finally { setFixingId(null); }
@@ -355,7 +330,8 @@ function DashboardWorkspace({area}:{area:PilotId}) {
         );
     }
 
-    const shownCost = visibleItems.reduce((acc, i) => acc + i.cost_rm, 0);
+    const shownCost = visibleItems.reduce((acc, item) => acc + (defectById.get(item.id)?.estimated_cost_rm ?? 0), 0);
+    const selectedTarget = selectedDefect ? reportTarget(selectedDefect) : null;
 
     /* ---------------- Render ---------------- */
 
@@ -389,22 +365,40 @@ function DashboardWorkspace({area}:{area:PilotId}) {
 
             {loadError && (
                 <div role="alert" className="bg-amber-50 border-b border-amber-300 text-amber-900 text-sm font-semibold px-8 py-2">
-                    We could not load the latest reports. These figures may be out of date.
+                    {loadError}
                 </div>
             )}
 
             <main className="max-w-[1500px] mx-auto px-4 sm:px-6 mt-6 space-y-6">
                 <PilotSelector area={area} onChange={next=>router.replace(`?area=${next}`)}/>
-                {!IS_PAGES_PREVIEW && <ReviewerAccess reviewerKey={reviewerKey} onKey={setReviewerKey} />}
+                {!IS_PAGES_PREVIEW && <ReviewerAccess reviewerKey={reviewerKey} onKey={key => {
+                    setReviewerKey(key);
+                    if (!key) { setTeamFilter(''); setOverdueOnly(false); setCaseStatus('all'); }
+                }} />}
+                <nav aria-label="Operator workspace" className="flex flex-wrap gap-2">
+                    {([['cases', 'Maintenance queue'], ['activity', 'Activity and exports'], ['targets', 'Access and responsibility']] as const)
+                        .map(([value, label]) => <button type="button" key={value} aria-pressed={section === value} onClick={() => {
+                            setSection(value);
+                            if (value === 'targets') setFocusTarget(undefined);
+                        }} className={`min-h-11 rounded-lg border border-slate-300 px-3 text-sm font-bold ${section === value
+                            ? 'bg-slate-900 text-white' : 'bg-white text-slate-800'}`}>{label}</button>)}
+                </nav>
+                {section !== 'cases' && !operatorKey && <p className="rounded-xl border border-slate-300 bg-white p-4">
+                    {IS_PAGES_PREVIEW ? 'Live operator tools are available on the server app.' : 'Enter the reviewer key to open this workspace.'}
+                </p>}
+                {section === 'activity' && operatorKey && <ActivityPanel area={area} reviewerKey={operatorKey} onOpenCase={id => {
+                    setSection('cases'); setFilter('all'); setTeamFilter(''); setOverdueOnly(false); setCaseStatus('all'); setSelectedId(id);
+                }} />}
+                {section === 'targets' && operatorKey && <TargetsPanel area={area} reviewerKey={operatorKey} initial={focusTarget} />}
+                {section === 'cases' && <>
                 <PilotSources area={area}/>
-
                 {/* KPI strip */}
                 <section aria-label="Key figures" className="grid grid-cols-1 min-[480px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
                     <Kpi Icon={ClipboardList} label="Open defects" value={metrics.open.toLocaleString()} sub="Waiting for a fix" />
                     <Kpi Icon={AlertTriangle} label="Critical blockers" value={metrics.blockers.toLocaleString()} sub="Stop some people walking" />
                     <Kpi Icon={Wallet} label="Backlog cost" value={`RM ${metrics.cost.toLocaleString()}`} sub="Estimated, all open defects" />
                     <Kpi Icon={Footprints} label="Mapped places" value={dataCounts.places.toLocaleString()} sub="Recorded destinations & stops" />
-                    <Kpi Icon={ClipboardList} label="Verification records" value={dataCounts.observations.toLocaleString()} sub="Observation history, all statuses" />
+                    <Kpi Icon={ClipboardList} label="Unassigned cases" value={metrics.unassigned.toLocaleString()} sub="Open cases awaiting a team" />
                 </section>
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -426,11 +420,12 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                                     hoveredPinId={hoveredId}
                                     onPinSelect={(id) => { setSelectedId(String(id)); setConfirmFixId(null); }}
                                     startCoords={PILOTS[area].centre}
+                                    reduceMotion
                                 />
                             </div>
                         </div>
 
-                        <div className="bg-white rounded-2xl p-4 border border-slate-200/70 shadow-sm">
+                        <div id="case-details" className="scroll-mt-24 bg-white rounded-2xl p-4 border border-slate-200/70 shadow-sm">
                             {selectedDefect ? (
                                 <div className="space-y-3">
                                     <div className="flex items-start justify-between gap-3">
@@ -452,12 +447,19 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                                     <dl className="grid grid-cols-4 gap-3 text-sm">
                                         <div><dt className="text-xs text-slate-500">Severity</dt><dd className="mt-0.5"><SeverityBadge severity={selectedDefect.severity ?? 'comfort'} /></dd></div>
                                         <div><dt className="text-xs text-slate-500">Type</dt><dd className="font-semibold">{selectedDefect.category}</dd></div>
-                                        <div><dt className="text-xs text-slate-500">Estimated cost</dt><dd className="font-semibold tabular-nums">{selectedItem ? `RM ${selectedItem.cost_rm.toLocaleString()}` : 'Awaiting estimate'}</dd></div>
+                                        <div><dt className="text-xs text-slate-500">Estimated cost</dt><dd className="font-semibold tabular-nums">{selectedDefect.estimated_cost_rm ? `RM ${selectedDefect.estimated_cost_rm.toLocaleString()}` : 'Awaiting estimate'}</dd></div>
                                         <div><dt className="text-xs text-slate-500">Reported</dt><dd className="font-semibold">{timeAgo(selectedDefect.created_at)}</dd></div>
                                     </dl>
                                     <p className="text-sm font-bold">{reportStatus(selectedDefect)}
                                         {selectedDefect.responsible_team && ` · ${selectedDefect.responsible_team}`}</p>
                                     {selectedDefect.review_note && <p className="text-sm">{selectedDefect.review_note}</p>}
+                                    {operatorKey && <AssignmentEditor key={selectedDefect.id} area={area} reviewerKey={operatorKey} report={selectedDefect} onSaved={report => {
+                                        setDefects(previous => previous.map(row => String(row.id) === String(report.id) ? report : row));
+                                        setRefreshVersion(value => value + 1);
+                                        setNotice({ tone: 'ok', text: 'Assignment saved.' });
+                                    }} />}
+                                    {operatorKey && selectedTarget && <button type="button" className="min-h-11 text-sm font-bold text-[#7F1D22] underline"
+                                        onClick={() => { setFocusTarget(selectedTarget); setSection('targets'); }}>View mapped target and responsibility</button>}
                                     {related.length > 0 && <details className="text-sm">
                                         <summary className="min-h-8 cursor-pointer font-bold">Related open reports · {related.length}</summary>
                                         <ul>{related.map(report => <li key={report.id}>
@@ -468,10 +470,10 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                                     </details>}
                                     {selectedDefect.checked_at ? renderFixButton(String(selectedDefect.id), 'md') : !IS_PAGES_PREVIEW &&
                                         <form className="space-y-2" onSubmit={event => void confirmReport(event, String(selectedDefect.id))}>
-                                            <label className="block text-sm font-bold">Responsible team
+                                            {!selectedDefect.responsible_team && <label className="block text-sm font-bold">Responsible team
                                                 <input required maxLength={120} className="mt-1 min-h-11 w-full rounded border border-slate-400 px-2"
                                                     value={reviewTeam} onChange={event => setReviewTeam(event.target.value)} />
-                                            </label>
+                                            </label>}
                                             <label className="block text-sm font-bold">What did the team check?
                                                 <textarea required maxLength={600} className="mt-1 w-full rounded border border-slate-400 p-2"
                                                     value={reviewNote} onChange={event => setReviewNote(event.target.value)} />
@@ -495,17 +497,16 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                     <div className="lg:col-span-7 bg-white rounded-2xl p-5 border border-slate-200/70 shadow-sm space-y-4">
                         <div className="flex flex-wrap items-center justify-between gap-3">
                             <div>
-                                <h2 className="text-lg font-extrabold text-slate-900">Infrastructure investment queue</h2>
-                                <p className="text-xs text-slate-500">Ranked by priority. Circle pins are critical, square pins are moderate.</p>
+                                <h2 className="text-lg font-extrabold text-slate-900">Maintenance queue</h2>
+                                <p className="text-xs text-slate-500">Priority uses severity, overdue work, related open reports and waiting time.</p>
                             </div>
                             <div role="group" aria-label="Sort order" className="inline-flex rounded-lg border border-slate-300 overflow-hidden text-xs font-bold">
                                 {([['priority', 'Priority'], ['recent', 'Most recent']] as [SortBy, string][]).map(([v, label]) => (
                                     <button
                                         key={v}
                                         onClick={() => setSortBy(v)}
-                                        disabled={v === 'recent' && !hasDates}
+                                        disabled={v === 'recent' && !defects.length}
                                         aria-pressed={sortBy === v}
-                                        title={v === 'recent' && !hasDates ? 'Reports have no date yet' : undefined}
                                         className={`px-3 py-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#A4262C] ${sortBy === v ? 'bg-slate-900 text-white' : 'bg-white text-slate-700 hover:bg-slate-50'
                                             }`}
                                     >
@@ -533,17 +534,24 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                         </div>
 
                         {/* Table */}
-                        {awaitingEstimate.length > 0 && <section className="space-y-2 rounded-xl border border-slate-300 p-3">
-                            <h3 className="font-bold">Reports without cost estimates</h3>
-                            <ul className="divide-y divide-slate-200">{awaitingEstimate.map(report => <li key={report.id} id={`row-${report.id}`}
-                                className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
-                                <button type="button" className="min-h-11 text-left font-bold underline" aria-pressed={selectedId === String(report.id)}
-                                    onClick={() => selectRow(report.id)}>
-                                    {report.location_name} · {report.description}
-                                </button>
-                                <span>{reportStatus(report)}</span>
-                            </li>)}</ul>
-                        </section>}
+                        {operatorKey && <div className="flex flex-wrap items-end gap-3">
+                            <label className="flex flex-col text-sm font-semibold">Case team
+                                <select className="min-h-11 rounded-lg border border-slate-400 px-2" value={teamFilter}
+                                    onChange={event => setTeamFilter(event.target.value)}>
+                                    <option value="">All teams</option><option value="unassigned">Unassigned</option>
+                                    {teams.map(team => <option value={`team:${team}`} key={team}>{team}</option>)}
+                                </select>
+                            </label>
+                            <label className="flex flex-col text-sm font-semibold">Case status
+                                <select className="min-h-11 rounded-lg border border-slate-400 px-2" value={caseStatus}
+                                    onChange={event => setCaseStatus(event.target.value)}>
+                                    <option value="all">All open cases</option><option value="reported">Reported</option><option value="checked">Checked</option>
+                                </select>
+                            </label>
+                            <label className="flex min-h-11 items-center gap-2 text-sm font-semibold">
+                                <input type="checkbox" checked={overdueOnly} onChange={event => setOverdueOnly(event.target.checked)} />Overdue only
+                            </label>
+                        </div>}
                         <div className="overflow-x-auto">
                             <table className="w-full text-left border-collapse">
                                 <thead>
@@ -552,7 +560,7 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                                         <th className="py-2 px-2">Location and defect</th>
                                         <th className="py-2 px-2">Severity</th>
                                         <th className="py-2 px-2 text-right">Est. cost</th>
-                                        <th className="py-2 px-2 w-28">Priority</th>
+                                        <th className="py-2 px-2 w-28">Assignment</th>
                                         <th className="py-2 px-2">Reported</th>
                                         <th className="py-2 px-2 text-right">Action</th>
                                     </tr>
@@ -581,8 +589,7 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                                             const rawDefect = defectById.get(id);
                                             const locationName = rawDefect?.location_name || `Walkway Edge #${rawDefect?.edge_id ?? '—'}`;
                                             const isSelected = selectedId === id;
-                                            const meta = KIND_META[item.kind as Kind] ?? KIND_META.crossing;
-                                            const relative = Math.round((item.score_mid / maxScore) * 100);
+                                            const meta = KIND_META[item.kind];
 
                                             return (
                                                 <tr
@@ -600,7 +607,7 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                                                     className={`cursor-pointer text-sm outline-none transition-colors focus-visible:bg-slate-100 ${isSelected ? 'bg-[#FBF1F1]' : 'hover:bg-slate-50'}`}
                                                 >
                                                     <td className={`py-3 pl-3 pr-2 border-l-4 ${isSelected ? 'border-l-[#A4262C]' : 'border-l-transparent'}`}>
-                                                        <RankBadge rank={rankOf.get(id) ?? 0} severity={item.severity} />
+                                                        <RankBadge rank={item.rank} severity={item.severity} />
                                                     </td>
                                                     <td className="py-3 px-2 max-w-[260px]">
                                                         <p className="font-bold text-slate-900 truncate">{locationName}</p>
@@ -611,15 +618,14 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                                                     </td>
                                                     <td className="py-3 px-2"><SeverityBadge severity={item.severity} /></td>
                                                     <td className="py-3 px-2 text-right font-semibold tabular-nums whitespace-nowrap">
-                                                        RM {item.cost_rm.toLocaleString()}
+                                                        {rawDefect?.estimated_cost_rm ? `RM ${rawDefect.estimated_cost_rm.toLocaleString()}` : '—'}
                                                     </td>
-                                                    <td className="py-3 px-2">
-                                                        <div className="flex items-center gap-2" title="Priority score, relative to the top item">
-                                                            <div className="w-14 h-1.5 rounded-full bg-slate-200 overflow-hidden">
-                                                                <div className="h-full bg-slate-700" style={{ width: `${Math.max(4, relative)}%` }} />
-                                                            </div>
-                                                            <span className="text-xs font-semibold text-slate-600 tabular-nums w-7">{relative}</span>
-                                                        </div>
+                                                    <td className="py-3 px-2 text-sm">
+                                                        <p>{rawDefect?.responsible_team || 'Unassigned'}</p>
+                                                        {operatorKey && rawDefect?.due_on && <p className={isOverdue(rawDefect, today) ? 'font-bold text-[#7F1D22]' : 'text-slate-600'}>
+                                                            {isOverdue(rawDefect, today) ? 'Overdue' : 'Due'} {rawDefect.due_on}
+                                                        </p>}
+                                                        {item.count > 1 && <p className="text-xs text-slate-600">{item.count} related reports</p>}
                                                     </td>
                                                     <td className="py-3 px-2 text-xs text-slate-600 whitespace-nowrap">{timeAgo(rawDefect?.created_at)}</td>
                                                     <td className="py-3 px-2 text-right">
@@ -641,6 +647,7 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                         )}
                     </div>
                 </div>
+                </>}
             </main>
 
             {/* Result of the last action */}

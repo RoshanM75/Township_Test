@@ -412,6 +412,8 @@ export default function InteractiveMap({
                 scrollWheelZoom
                 className="w-full h-full"
                 zoomControl={false}
+                zoomAnimation={!reduceMotion}
+                fadeAnimation={!reduceMotion}
                 preferCanvas={Boolean(localBasemap)}
             >
                 {localBasemap && <Pane name="pilot-basemap" style={{ zIndex: 190 }}><LocalBasemap url={localBasemap} /></Pane>}

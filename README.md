@@ -66,6 +66,18 @@ The [team design direction](docs/team-design-direction.md) maps the environmenta
 - Residents can report paths, crossings, lift outages, unavailable facilities and incorrect place details. In `/dashboard`, a reviewer records the responsible team and what they checked, then marks the repair fixed after confirming it. The resident report history shows each date. Checked outages can change the available routes, and affected active and saved walks show an update.
 - GitHub Pages includes the place data, route editor and device drafts. Sharing, review and live maintenance require the Next.js server and PostGIS.
 
+### Operator workspace
+
+Open `/dashboard`, select the pilot and enter the reviewer key.
+
+- **Maintenance queue** lists open cases by severity, overdue work, related reports and waiting time. An operator can assign a team, record a due date and link an existing work order. The assignment history records each handoff. Residents see the responsible team and report status.
+- **Access and responsibility** shows mapped paths and facilities with incomplete, expired or upcoming checks. Search by name, team or map ID, select the target and record its responsible team with an asset-register or handover reference. New reports on the exact target inherit that team. Use the target’s verification link to record field observations.
+- **Activity and exports** tracks reported, checked, fixed and dismissed events over 7, 30 or 90 days. It shows median time from report to check or fix, the current workload by team, and repeat reports on the same target. Each event counts in the period when it occurred. Access coverage counts the latest, current evidence for each checklist field, including confirmed barriers.
+
+CSV, GeoJSON and JSON downloads are available for cases and access checks. Case downloads include open cases and events in the selected period. Check downloads cover the pilot inventory as of export time. Integration clients use `GET /api/operator/activity` and `GET /api/operator/export?area=pasar-seni&dataset=cases&format=json&days=30` with the server reviewer key as a Bearer token. Use `dataset=checks` for the access inventory. The machine-readable exports include a schema version, the pilot and the map revision. Free-text report and audit notes stay outside these downloads.
+
+Run `npm run db:setup` to apply the operator tables to an existing server. GitHub Pages still serves the public pilot maps and source data. Live assignments, reporting history, and operator exports use PostGIS.
+
 ### Database configuration
 
 The app and setup scripts default to the development database created by Compose. Copy `.env.example` to `.env.local` to set `TOWNSHIP_REVIEW_KEY` or override `DATABASE_URL`. Both values stay on the Next.js server. Enter the reviewer key in the maintenance or verification page to enable review actions in that tab.
