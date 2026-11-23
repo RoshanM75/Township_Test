@@ -5,6 +5,9 @@ import { estimateDefectCost } from '../scoring.ts';
 import type { HazardKind } from '../routing.ts';
 import type { PilotId } from '../pilots.ts';
 import { pilotContext } from './pilots.ts';
+import { assignmentInput, recordAssignment, responsibilityAt } from './responsibilities.ts';
+import type { MaintenanceDefect } from '../types.ts';
+import { reportTarget } from '../operator.ts';
 
 const PROBLEMS: Record<HazardKind, { category: string; severity: 'blocker' | 'comfort'; label: string }> = {
     blocked: { category: 'Access Barrier', severity: 'blocker', label: 'Path is blocked' },
@@ -44,9 +47,11 @@ const REPORT_FIELDS = `id::text, hazard_report_id::text, edge_id::float8 AS edge
     lat, lng, kind, description, category, severity, location_name, estimated_cost_rm,
     reported_by_proxy, status, created_at, asset_id::text, checked_at, fixed_at, dismissed_at, responsible_team, review_note`;
 
-export async function readReports(includeFixed = false, area: PilotId = 'elmina') {
-    const { rows } = await getPool().query(`SELECT ${REPORT_FIELDS} FROM defect_reports
-        WHERE ($1::boolean OR status <> 'fixed') AND area_id=$2 ORDER BY created_at DESC, id DESC`, [includeFixed,area]);
+const OPERATOR_REPORT_FIELDS = `${REPORT_FIELDS}, due_on::text, work_order_ref, assignment_version`;
+
+export async function readReports(includeFixed = false, area: PilotId = 'elmina', forOperator = false) {
+    const { rows } = await getPool().query<MaintenanceDefect>(`SELECT ${forOperator ? OPERATOR_REPORT_FIELDS : REPORT_FIELDS} FROM defect_reports
+        WHERE ($1::boolean OR status <> 'fixed') AND area_id=$2 ORDER BY created_at DESC, id DESC`, [includeFixed, area]);
     return rows;
 }
 
@@ -77,18 +82,21 @@ export async function createReport(report: NewReport) {
         const problem = PROBLEMS[report.kind];
         const location = asset?.name || edge?.name || `${edge?.is_crossing ? 'Crossing' : 'Walkway'} #${edge?.id}`;
         const description = report.description || `${problem.label} reported on ${location}`;
+        const target = reportTarget({ edge_id: edge ? Number(edge.id) : null, asset_id: asset?.id });
+        const responsibility = target ? await responsibilityAt(client, area, target) : null;
         const { rows: hazards } = await client.query(`INSERT INTO hazard_reports(edge_id, lat, lng, kind, area_id, asset_id)
             VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING id::float8 AS id, edge_id::float8 AS edge_id, lat, lng, kind, status, asset_id::text`,
         [edge?.id ?? null, lat, lng, report.kind, area, asset?.id ?? null]);
         const { rows: defects } = await client.query(`INSERT INTO defect_reports
             (hazard_report_id, edge_id, lat, lng, kind, description, category, severity, location_name,
-             estimated_cost_rm, reported_by_proxy, area_id, asset_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+             estimated_cost_rm, reported_by_proxy, area_id, asset_id, responsible_team, assignment_version)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             RETURNING ${REPORT_FIELDS}`,
         [hazards[0].id, edge?.id ?? null, lat, lng, report.kind, description, problem.category, problem.severity, location,
             report.kind === 'details_outdated' || report.kind === 'lift_out' ? 0 : estimateDefectCost(report.kind, edge?.length_m),
-            report.reported_by_proxy, area, asset?.id ?? null]);
+            report.reported_by_proxy, area, asset?.id ?? null, responsibility?.team ?? null, responsibility ? 1 : 0]);
+        if (responsibility) await recordAssignment(client, { ...defects[0], assignment_version: 1 }, 'responsibility');
         await client.query('COMMIT');
         return { hazard: hazards[0], report: defects[0] };
     } catch (error) {
@@ -103,7 +111,7 @@ export async function reviewReport(id: string, area: PilotId, check?: { team: st
     const client = await getPool().connect();
     try {
         await client.query('BEGIN');
-        const old = (await client.query(`SELECT ${REPORT_FIELDS} FROM defect_reports
+        const old = (await client.query<MaintenanceDefect>(`SELECT ${OPERATOR_REPORT_FIELDS} FROM defect_reports
             WHERE id=$1 AND area_id=$2 FOR UPDATE`, [id, area])).rows[0];
         if (!old) throw new RequestError('The report was not found.', 404);
         if (old.status === 'fixed' || (check && old.checked_at)) {
@@ -111,13 +119,15 @@ export async function reviewReport(id: string, area: PilotId, check?: { team: st
             return old;
         }
         if (!check && !old.checked_at) throw new RequestError('Check the report before marking it fixed.', 409);
+        const assign = Boolean(check && !old.responsible_team);
         const { rows } = check
-            ? await client.query(`UPDATE defect_reports SET checked_at=NOW(), responsible_team=$2, review_note=$3,
-                status=CASE WHEN $4 THEN 'fixed' ELSE status END,
-                dismissed_at=CASE WHEN $4 THEN NOW() ELSE NULL END
-                WHERE id=$1 RETURNING ${REPORT_FIELDS}`, [id, check.team, check.note, check.dismiss])
-            : await client.query(`UPDATE defect_reports SET status='fixed', fixed_at=NOW()
-                WHERE id=$1 RETURNING ${REPORT_FIELDS}`, [id]);
+            ? await client.query<MaintenanceDefect>(`UPDATE defect_reports SET checked_at=NOW(), responsible_team=COALESCE(responsible_team,$2), review_note=$3,
+                status=CASE WHEN $4 THEN 'fixed' ELSE status END, dismissed_at=CASE WHEN $4 THEN NOW() ELSE NULL END,
+                assignment_version=assignment_version + CASE WHEN $5 THEN 1 ELSE 0 END
+                WHERE id=$1 RETURNING ${OPERATOR_REPORT_FIELDS}`, [id, check.team, check.note, check.dismiss, assign])
+            : await client.query<MaintenanceDefect>(`UPDATE defect_reports SET status='fixed', fixed_at=NOW()
+                WHERE id=$1 RETURNING ${OPERATOR_REPORT_FIELDS}`, [id]);
+        if (assign) await recordAssignment(client, rows[0], 'review');
         await client.query('UPDATE hazard_reports SET status=$2 WHERE id=$1',
             [old.hazard_report_id, check && !check.dismiss ? 'verified' : 'fixed']);
         await client.query('COMMIT');
@@ -135,4 +145,31 @@ export async function databaseHealth() {
         (SELECT count(*)::int FROM path_nodes) AS nodes,
         (SELECT count(*)::int FROM path_edges WHERE pedestrian_access) AS edges`);
     return { database: 'ok', ...rows[0] };
+}
+
+
+export async function assignReport(id: string, area: PilotId, input: ReturnType<typeof assignmentInput>) {
+    const client = await getPool().connect();
+    try {
+        await client.query('BEGIN');
+        const { rows: [old] } = await client.query<MaintenanceDefect>(`SELECT ${OPERATOR_REPORT_FIELDS} FROM defect_reports
+            WHERE id=$1 AND area_id=$2 FOR UPDATE`, [id, area]);
+        if (!old) throw new RequestError('The report was not found in this area.', 404);
+        if (old.status === 'fixed') throw new RequestError('This report is already closed.', 409);
+        const same = old.responsible_team === input.team && old.due_on === input.due_on && old.work_order_ref === input.work_order_ref;
+        if (same) {
+            await client.query('COMMIT');
+            return old;
+        }
+        if (old.assignment_version !== input.version) throw new RequestError('Another operator updated this assignment. Refresh and review the changes.', 409);
+        const { rows: [report] } = await client.query<MaintenanceDefect>(`UPDATE defect_reports SET responsible_team=$2, due_on=$3,
+            work_order_ref=$4, assignment_version=assignment_version+1 WHERE id=$1 RETURNING ${OPERATOR_REPORT_FIELDS}`,
+        [id, input.team, input.due_on, input.work_order_ref]);
+        await recordAssignment(client, report, 'manual');
+        await client.query('COMMIT');
+        return report;
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally { client.release(); }
 }

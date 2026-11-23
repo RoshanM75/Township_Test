@@ -1,5 +1,6 @@
 import type { PathNode, PathEdge, HazardReport, HazardKind } from './routing';
 import type { MaintenanceDefect } from './types';
+import type { Assignment, OperatorActivity, OperatorTarget, CoverageRow, Responsibility } from './operator';
 import type { WalkingData } from './walking';
 import type { CommunityDraft, CommunityRoute, RoutePoint } from './community-routes';
 import { IS_PAGES_PREVIEW, dataPath } from './site.ts';
@@ -50,7 +51,9 @@ export const recordVerification = (record: unknown, key: string) => request<{ id
     method: 'POST', headers: reviewerHeaders(key), body: JSON.stringify(record),
 });
 export const loadHazards = (area?:PilotId) => request<{ hazards: HazardReport[] }>('/api/hazards',undefined,area);
-export const loadReports = (status: 'all' | 'open' = 'open',area?:PilotId) => request<{ reports: MaintenanceDefect[] }>(`/api/reports?status=${status}`,undefined,area);
+export const loadReports = (status: 'all' | 'open' = 'open', area?: PilotId, key?: string) =>
+    request<{ reports: MaintenanceDefect[] }>(`/api/reports?status=${status}${key ? '&operator=1' : ''}`,
+        key ? { headers: reviewerHeaders(key) } : undefined, area);
 export const submitReport = (report: ReportInput) => request<{ hazard: HazardReport; report: MaintenanceDefect }>('/api/reports', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(report),
 });
@@ -93,4 +96,38 @@ export async function loadWeatherWarnings(area: PilotId): Promise<WeatherWarning
     } catch {
         return unavailableWarnings();
     }
+}
+
+
+export const loadOperatorActivity = (area: PilotId, key: string, days: number) =>
+    request<OperatorActivity>(`/api/operator/activity?days=${days}`, { headers: reviewerHeaders(key) }, area);
+
+export const loadOperatorTargets = (area: PilotId, key: string, query: URLSearchParams) => request<{
+    as_of: string; dataset_id: string; coverage: CoverageRow[]; targets: OperatorTarget[]; total: number; offset: number; next_offset: number | null;
+}>(`/api/operator/targets?${query}`, { headers: reviewerHeaders(key) }, area);
+
+export const updateResponsibility = (area: PilotId, key: string, input: Pick<OperatorTarget, 'target_type' | 'target_id'> &
+    { team: string | null; reference?: string }) => request<{ responsibility: Responsibility | null }>('/api/operator/targets', {
+        method: 'PUT', headers: reviewerHeaders(key), body: JSON.stringify(input),
+    }, area);
+
+export const loadAssignmentHistory = (area: PilotId, key: string, id: string) => request<{ history: Assignment[] }>(
+    `/api/reports/${encodeURIComponent(id)}/assignment`, { headers: reviewerHeaders(key) }, area);
+
+export const updateReportAssignment = (area: PilotId, key: string, id: string,
+    input: Pick<Assignment, 'team' | 'due_on' | 'work_order_ref' | 'version'>) => request<{ report: MaintenanceDefect }>(
+    `/api/reports/${encodeURIComponent(id)}/assignment`, {
+        method: 'PATCH', headers: reviewerHeaders(key), body: JSON.stringify(input),
+    }, area);
+
+export async function downloadOperatorData(area: PilotId, key: string, dataset: 'cases' | 'checks', format: 'csv' | 'geojson' | 'json', days = 30) {
+    const response = await fetch(dataPath(`/api/operator/export?dataset=${dataset}&format=${format}&days=${days}`, area),
+        { headers: reviewerHeaders(key), cache: 'no-store' });
+    if (!response.ok) throw new Error((await response.json()).error || 'The data could not be exported.');
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `townshipgo-${area}-${dataset}.${format}`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

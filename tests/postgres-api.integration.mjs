@@ -319,6 +319,80 @@ test('Next.js APIs with real PostgreSQL/PostGIS', { timeout: 60000 }, async (t) 
             assert.equal(unmapped.body.route.path, null);
             assert.equal((await review(endpoint(unmapped.body.route.id), { ...evidence, action: 'publish' })).status, 422);
         });
+        await t.test('operator responsibility routes new reports and case handoffs are private and versioned', async () => {
+            const area = 'pasar-seni';
+            const targetsPath = `/api/operator/targets?area=${area}`;
+            const graph = (await request(`/api/graph?area=${area}`)).body;
+            const edge = graph.edges.find(edge => edge.name === 'Test public path');
+            const [lng, lat] = edge.geometry[0];
+            const ownership = { target_type: 'edge', target_id: String(edge.id), team: 'Township operations', reference: 'Asset register 2' };
+            assert.equal((await request(targetsPath)).status, 401);
+            assert.equal((await review('/api/operator/targets?area=elmina', ownership, 'PUT')).status, 404);
+            const owned = await review(targetsPath, ownership, 'PUT');
+            assert.equal(owned.status, 200);
+            assert.equal((await review(targetsPath, ownership, 'PUT')).body.responsibility.updated_at, owned.body.responsibility.updated_at);
+            const mapTargets = (await review(`${targetsPath}&q=${edge.id}`, undefined, 'GET')).body;
+            assert.equal(mapTargets.total, 1);
+            assert.equal(mapTargets.targets[0].responsibility.team, ownership.team);
+            assert.equal(mapTargets.targets[0].check.status, 'incomplete');
+            assert.equal(mapTargets.coverage.find(row => row.kind === 'path').owned, 1);
+
+            const checkedAt = new Date().toISOString();
+            const validThrough = new Date(Date.now() + 7 * 86400000).toISOString();
+            const audit = await review('/api/verifications', { area_id: area, target_type: 'path', target_id: String(edge.id),
+                status: 'verified', method: 'site_visit', reviewer: 'Operator test audit', observed_at: checkedAt, valid_until: validThrough,
+                attributes: { path_open: true, has_steps: false, slope_pct: 3, surface_rating: 1, clear_width_m: 1.8 } });
+            assert.equal(audit.status, 201);
+            const due = (await review(`${targetsPath}&q=${edge.id}&state=due_soon`, undefined, 'GET')).body;
+            assert.equal(due.targets[0].check.status, 'current');
+            assert.equal(due.targets[0].check.next_due, validThrough);
+            assert.equal(due.coverage.find(row => row.kind === 'path').due_soon, 1);
+
+            const payload = { area_id: area, lat, lng, edge_id: edge.id, kind: 'blocked', description: 'Operator test case notes' };
+            const initial = (await post(payload)).body.report;
+            assert.equal(initial.responsible_team, ownership.team);
+            assert.equal(initial.assignment_version, undefined);
+            const [other] = (await review(`/api/reports?area=${area}&operator=1`, undefined, 'GET')).body.reports;
+            assert.equal(other.assignment_version, 1);
+            const assignment = `/api/reports/${initial.id}/assignment?area=${area}`;
+            assert.equal((await request(assignment)).status, 401);
+            const body = { team: 'Walkway contractor', due_on: '2026-11-19', work_order_ref: '=MY-001', version: 1 };
+            const saved = await review(assignment, body, 'PATCH');
+            assert.equal(saved.status, 200);
+            assert.equal(saved.body.report.assignment_version, 2);
+            assert.equal((await review(assignment, body, 'PATCH')).body.report.assignment_version, 2);
+            assert.equal((await review(assignment, { ...body, team: 'Other team' }, 'PATCH')).status, 409);
+            assert.equal((await review(assignment, { ...body, due_on: '2026-02-31', version: 2 }, 'PATCH')).status, 400);
+            const history = (await review(assignment, undefined, 'GET')).body.history;
+            assert.deepEqual(history.map(item => item.source), ['manual', 'responsibility']);
+            const shared = (await request(`/api/reports?area=${area}`)).body.reports[0];
+            assert.equal(shared.responsible_team, body.team);
+            assert.equal(shared.work_order_ref, undefined);
+            assert.equal(shared.due_on, undefined);
+            assert.equal((await check(initial.id, area)).body.report.responsible_team, body.team);
+
+            const second = await post(payload);
+            assert.equal(second.body.report.responsible_team, ownership.team);
+            const activity = (await review(`/api/operator/activity?area=${area}&days=7`, undefined, 'GET')).body;
+            assert.equal(activity.hotspots.find(item => item.name === edge.name).open, 2);
+            assert.ok(activity.teams.some(row => row.team === body.team));
+            assert.equal((await review(`/api/operator/activity?area=${area}&days=14`, undefined, 'GET')).status, 400);
+
+            const exportPath = `/api/operator/export?area=${area}`;
+            assert.equal((await request(exportPath + '&format=json')).status, 401);
+            const json = (await review(exportPath + '&format=json', undefined, 'GET')).body;
+            assert.equal(json.area_id, area);
+            assert.equal(json.rows.find(row => row.id === initial.id).work_order_ref, body.work_order_ref);
+            assert.ok(!JSON.stringify(json).includes(payload.description));
+            const csv = await fetch(`http://127.0.0.1:${port}${exportPath}`, { headers: { Authorization: `Bearer ${reviewKey}` } });
+            assert.match(csv.headers.get('content-disposition'), /townshipgo-pasar-seni-cases.csv/);
+            assert.match(await csv.text(), /"'=MY-001"/);
+            const geo = await review(exportPath + '&dataset=checks&format=geojson', undefined, 'GET');
+            assert.equal(geo.body.type, 'FeatureCollection');
+            assert.equal(geo.body.features.find(feature => feature.properties.target_id === String(edge.id)).geometry.type, 'LineString');
+            assert.equal((await review(targetsPath, { ...ownership, team: null }, 'PUT')).body.responsibility, null);
+            assert.equal((await review(assignment, undefined, 'GET')).body.history.length, 2);
+        });
         await t.test('database outages return 503 without exposing connection details', async () => {
             await fixture.end(); fixture = undefined;
             await admin.query(`DROP DATABASE "${databaseName}" WITH (FORCE)`); dropped = true;
