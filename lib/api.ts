@@ -1,6 +1,7 @@
 import type { PathNode, PathEdge, HazardReport, HazardKind } from './routing';
 import type { MaintenanceDefect } from './types';
 import type { WalkingData } from './walking';
+import type { CommunityDraft, CommunityRoute, RoutePoint } from './community-routes';
 import { IS_PAGES_PREVIEW, dataPath } from './site.ts';
 import { weatherUrl, parseWeather, unavailableWeather, type WalkingWeather } from './comfort.ts';
 import { DEFAULT_ORIGIN } from './precinct.ts';
@@ -20,6 +21,7 @@ export interface ReportInput {
     lng: number;
     kind: HazardKind;
     edge_id?: number;
+    asset_id?: string;
     description?: string;
     reported_by_proxy?: boolean;
 }
@@ -41,18 +43,35 @@ export const loadWalkingData = async (area?:PilotId) => {
     // The source is fixed, but the planning clock follows the visit.
     return IS_PAGES_PREVIEW ? { ...data, as_of: new Date().toISOString() } : data;
 };
-export const createWalkingAsset = (asset: unknown) => request<{ id: string }>('/api/assets', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(asset),
+export const createWalkingAsset = (asset: unknown, key: string) => request<{ id: string }>('/api/assets', {
+    method: 'POST', headers: reviewerHeaders(key), body: JSON.stringify(asset),
 });
-export const recordVerification = (record: unknown) => request<{ id: string }>('/api/verifications', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(record),
+export const recordVerification = (record: unknown, key: string) => request<{ id: string }>('/api/verifications', {
+    method: 'POST', headers: reviewerHeaders(key), body: JSON.stringify(record),
 });
 export const loadHazards = (area?:PilotId) => request<{ hazards: HazardReport[] }>('/api/hazards',undefined,area);
 export const loadReports = (status: 'all' | 'open' = 'open',area?:PilotId) => request<{ reports: MaintenanceDefect[] }>(`/api/reports?status=${status}`,undefined,area);
 export const submitReport = (report: ReportInput) => request<{ hazard: HazardReport; report: MaintenanceDefect }>('/api/reports', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(report),
 });
-export const markReportFixed = (id: string,area?:PilotId) => request<{ report: { id: string; status: string } }>(`/api/reports/${encodeURIComponent(id)}/fix`, { method: 'POST' },area);
+const reviewerHeaders = (key: string) => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${key}` });
+export const markReportFixed = (id: string, area: PilotId, key: string) => request<{ report: MaintenanceDefect }>(
+    `/api/reports/${encodeURIComponent(id)}/fix`, { method: 'POST', headers: reviewerHeaders(key) }, area);
+export const checkReport = (id: string, area: PilotId, key: string, input: { team: string; note: string; dismiss?: boolean }) =>
+    request<{ report: MaintenanceDefect }>(`/api/reports/${encodeURIComponent(id)}/check`,
+        { method: 'POST', headers: reviewerHeaders(key), body: JSON.stringify(input) }, area);
+
+export const loadCommunityRoutes = (area: PilotId, receipt?: string, chosenId?: string) => request<{ routes: CommunityRoute[] }>(
+    `/api/community-routes?${new URLSearchParams({ ...(receipt ? { receipt } : {}), ...(chosenId ? { id: chosenId } : {}) })}`, undefined, area);
+export const submitCommunityRoute = (area: PilotId, draft: CommunityDraft) => request<{ route: CommunityRoute }>('/api/community-routes', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...draft, public_ends: true }),
+}, area);
+export const loadCommunityQueue = (area: PilotId, key: string) =>
+    request<{ routes: Array<CommunityRoute & { points: RoutePoint[] }> }>('/api/community-routes?review=1',
+        { headers: reviewerHeaders(key) }, area);
+export const reviewCommunityRoute = (area: PilotId, id: string, key: string, body: unknown) =>
+    request<{ route: CommunityRoute }>(`/api/community-routes/${encodeURIComponent(id)}/review`,
+        { method: 'POST', headers: reviewerHeaders(key), body: JSON.stringify(body) }, area);
 
 export async function loadWeather(area?:PilotId): Promise<WalkingWeather> {
     const now = new Date().toISOString();

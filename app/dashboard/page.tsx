@@ -12,11 +12,14 @@ import {
     MapPin, RefreshCw, Check, X, ClipboardList, Wallet,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { loadReports, markReportFixed, loadWalkingData } from '@/lib/api';
+import { loadReports, checkReport, markReportFixed, loadWalkingData } from '@/lib/api';
 import type { MaintenanceDefect } from '@/lib/types';
 import { PILOTS,pilotFromParams,isPilotAvailable,type PilotId } from '@/lib/pilots';
 import { useClientReady } from '@/lib/use-client-ready';
 import PilotSelector from '@/components/walking/PilotSelector';
+import ReviewerAccess, { useReviewerKey } from '@/components/review/ReviewerAccess';
+import { reportStatus } from '@/lib/report-status';
+import type { FormEvent } from 'react';
 import PilotSources from '@/components/walking/PilotSources';
 import PilotUnavailable from '@/components/walking/PilotUnavailable';
 import {
@@ -104,6 +107,9 @@ function DashboardWithParams(){const params=useSearchParams(),area=pilotFromPara
 
 function DashboardWorkspace({area}:{area:PilotId}) {
     const router=useRouter();
+    const [reviewerKey, setReviewerKey] = useReviewerKey();
+    const [reviewTeam, setReviewTeam] = useState('');
+    const [reviewNote, setReviewNote] = useState('');
     const [defects, setDefects] = useState<MaintenanceDefect[]>([]);
     const [loading, setLoading] = useState(true);
     const [dataCounts, setDataCounts] = useState({ places: 0, observations: 0 });
@@ -174,16 +180,15 @@ function DashboardWorkspace({area}:{area:PilotId}) {
         return m;
     }, [defects]);
 
+    const awaitingEstimate = defects.filter(report => report.estimated_cost_rm === 0);
     const interventions: Intervention[] = useMemo(() => {
-        return defects.map((d) => {
+        return defects.filter(report => report.estimated_cost_rm !== 0).map((d) => {
             const isBlocker = d.severity === 'blocker' || d.category === 'Access Barrier' || d.category === 'Universal Design';
             const kind = d.category === 'Shade Infrastructure' ? 'shade'
                 : d.category === 'Safety Electrical' ? 'light'
                     : d.category === 'Universal Design' ? 'ramp' : 'crossing';
 
-            const cost = d.estimated_cost_rm && d.estimated_cost_rm > 0
-                ? d.estimated_cost_rm
-                : estimateDefectCost(kind, 20);
+            const cost = d.estimated_cost_rm ?? estimateDefectCost(kind, 20);
 
             return {
                 id: String(d.id),
@@ -235,11 +240,11 @@ function DashboardWorkspace({area}:{area:PilotId}) {
 
     const metrics = useMemo(() => {
         return {
-            open: rankedAll.length,
-            blockers: rankedAll.filter((i) => i.severity === 'blocker').length,
+            open: defects.length,
+            blockers: defects.filter(report => report.severity === 'blocker').length,
             cost: rankedAll.reduce((acc, i) => acc + i.cost_rm, 0),
         };
-    }, [rankedAll]);
+    }, [defects, rankedAll]);
 
     /* ---------------- Selection and map ---------------- */
 
@@ -247,7 +252,12 @@ function DashboardWorkspace({area}:{area:PilotId}) {
         () => (selectedId ? visibleItems.find((i) => String(i.id) === selectedId) ?? null : null),
         [selectedId, visibleItems],
     );
-    const selectedDefect = selectedItem ? defectById.get(String(selectedItem.id)) : null;
+    const selectedDefect = selectedId ? defectById.get(selectedId) : null;
+    const location = selectedDefect?.lat != null && selectedDefect.lng != null
+        ? [selectedDefect.lat, selectedDefect.lng] as [number, number] : undefined;
+    const related = selectedDefect ? defects.filter(report => report.id !== selectedDefect.id && report.kind === selectedDefect.kind &&
+        (selectedDefect.asset_id ? report.asset_id === selectedDefect.asset_id :
+            !report.asset_id && selectedDefect.edge_id !== null && report.edge_id === selectedDefect.edge_id)) : [];
 
     const pins = useMemo(() => {
         return visibleItems.flatMap((item) => {
@@ -271,6 +281,7 @@ function DashboardWorkspace({area}:{area:PilotId}) {
         const key = String(id);
         setSelectedId((cur) => (cur === key ? null : key));
         setConfirmFixId(null);
+        setReviewNote('');
     }
 
     // Keep the chosen row in view when it was picked from the map
@@ -294,16 +305,31 @@ function DashboardWorkspace({area}:{area:PilotId}) {
         setFixingId(id);
 
         try {
-            await markReportFixed(id,area);
+            await markReportFixed(id, area, reviewerKey);
             setDefects((prev) => prev.filter((d) => String(d.id) !== id));
             setSelectedId((cur) => (cur === id ? null : cur));
             setNotice({ tone: 'ok', text: 'Marked as fixed.' });
         } catch (err) {
             console.error('Failed to update defect state:', err);
-            setNotice({ tone: 'error', text: 'Something went wrong. Please try again.' });
+            setNotice({ tone: 'error', text: err instanceof Error ? err.message : 'Could not update the report.' });
         } finally {
             setFixingId(null);
         }
+    }
+
+    async function confirmReport(event: FormEvent, id: string) {
+        event.preventDefault();
+        if (!reviewerKey || fixingId) return;
+        setFixingId(id);
+        const dismiss = ((event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null)?.value === 'dismiss';
+        try {
+            const { report } = await checkReport(id, area, reviewerKey, { team: reviewTeam, note: reviewNote, dismiss });
+            setDefects(previous => dismiss ? previous.filter(item => String(item.id) !== id)
+                : previous.map(item => String(item.id) === id ? report : item));
+            setReviewNote('');
+            setNotice({ tone: 'ok', text: dismiss ? 'Report reviewed and dismissed.' : 'Report checked and assigned.' });
+        } catch (error) { setNotice({ tone: 'error', text: error instanceof Error ? error.message : 'Could not check the report.' }); }
+        finally { setFixingId(null); }
     }
 
     /* ---------------- Small render helpers ---------------- */
@@ -312,11 +338,13 @@ function DashboardWorkspace({area}:{area:PilotId}) {
     function renderFixButton(id: string, size: 'sm' | 'md') {
         const confirming = confirmFixId === id;
         const busy = fixingId === id;
+        if (!defectById.get(id)?.checked_at) return <button type="button" className="min-h-11 text-sm font-bold underline"
+            onClick={event => { event.stopPropagation(); selectRow(id); }}>Review report</button>;
         const pad = size === 'sm' ? 'px-3 py-1.5 text-xs' : 'px-4 py-2 text-sm';
         return (
             <button
                 onClick={(e) => handleFixClick(id, e)}
-                disabled={busy}
+                disabled={busy || !reviewerKey}
                 className={`${pad} rounded-lg font-bold border transition-colors disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 ${confirming
                     ? 'bg-emerald-700 border-emerald-700 text-white hover:bg-emerald-800'
                     : 'bg-white border-emerald-700 text-emerald-800 hover:bg-emerald-50'
@@ -367,6 +395,7 @@ function DashboardWorkspace({area}:{area:PilotId}) {
 
             <main className="max-w-[1500px] mx-auto px-4 sm:px-6 mt-6 space-y-6">
                 <PilotSelector area={area} onChange={next=>router.replace(`?area=${next}`)}/>
+                {!IS_PAGES_PREVIEW && <ReviewerAccess reviewerKey={reviewerKey} onKey={setReviewerKey} />}
                 <PilotSources area={area}/>
 
                 {/* KPI strip */}
@@ -393,6 +422,7 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                                 <InteractiveMap
                                     pins={pins}
                                     selectedPinId={selectedItem ? String(selectedItem.id) : null}
+                                    focusLocation={selectedItem ? undefined : location}
                                     hoveredPinId={hoveredId}
                                     onPinSelect={(id) => { setSelectedId(String(id)); setConfirmFixId(null); }}
                                     startCoords={PILOTS[area].centre}
@@ -401,13 +431,13 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                         </div>
 
                         <div className="bg-white rounded-2xl p-4 border border-slate-200/70 shadow-sm">
-                            {selectedItem && selectedDefect ? (
+                            {selectedDefect ? (
                                 <div className="space-y-3">
                                     <div className="flex items-start justify-between gap-3">
                                         <div className="flex items-start gap-3 min-w-0">
-                                            <RankBadge rank={rankOf.get(String(selectedItem.id)) ?? 0} severity={selectedItem.severity} />
+                                            {selectedItem && <RankBadge rank={selectedItem.rank} severity={selectedItem.severity} />}
                                             <div className="min-w-0">
-                                                <h3 className="font-extrabold text-slate-900 leading-snug">{selectedItem.label}</h3>
+                                                <h3 className="font-extrabold text-slate-900 leading-snug">{selectedDefect.description || selectedDefect.category}</h3>
                                                 <p className="text-sm text-slate-600">{selectedDefect.location_name || `Walkway Edge #${selectedDefect.edge_id ?? '—'}`}</p>
                                             </div>
                                         </div>
@@ -420,12 +450,37 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                                         </button>
                                     </div>
                                     <dl className="grid grid-cols-4 gap-3 text-sm">
-                                        <div><dt className="text-xs text-slate-500">Severity</dt><dd className="mt-0.5"><SeverityBadge severity={selectedItem.severity} /></dd></div>
-                                        <div><dt className="text-xs text-slate-500">Type</dt><dd className="font-semibold">{KIND_META[selectedItem.kind as Kind]?.label ?? 'Other'}</dd></div>
-                                        <div><dt className="text-xs text-slate-500">Estimated cost</dt><dd className="font-semibold tabular-nums">RM {selectedItem.cost_rm.toLocaleString()}</dd></div>
+                                        <div><dt className="text-xs text-slate-500">Severity</dt><dd className="mt-0.5"><SeverityBadge severity={selectedDefect.severity ?? 'comfort'} /></dd></div>
+                                        <div><dt className="text-xs text-slate-500">Type</dt><dd className="font-semibold">{selectedDefect.category}</dd></div>
+                                        <div><dt className="text-xs text-slate-500">Estimated cost</dt><dd className="font-semibold tabular-nums">{selectedItem ? `RM ${selectedItem.cost_rm.toLocaleString()}` : 'Awaiting estimate'}</dd></div>
                                         <div><dt className="text-xs text-slate-500">Reported</dt><dd className="font-semibold">{timeAgo(selectedDefect.created_at)}</dd></div>
                                     </dl>
-                                    {renderFixButton(String(selectedItem.id), 'md')}
+                                    <p className="text-sm font-bold">{reportStatus(selectedDefect)}
+                                        {selectedDefect.responsible_team && ` · ${selectedDefect.responsible_team}`}</p>
+                                    {selectedDefect.review_note && <p className="text-sm">{selectedDefect.review_note}</p>}
+                                    {related.length > 0 && <details className="text-sm">
+                                        <summary className="min-h-8 cursor-pointer font-bold">Related open reports · {related.length}</summary>
+                                        <ul>{related.map(report => <li key={report.id}>
+                                            <button type="button" className="min-h-11 text-left underline" onClick={() => selectRow(report.id)}>
+                                                {reportStatus(report)} · {report.description}
+                                            </button>
+                                        </li>)}</ul>
+                                    </details>}
+                                    {selectedDefect.checked_at ? renderFixButton(String(selectedDefect.id), 'md') : !IS_PAGES_PREVIEW &&
+                                        <form className="space-y-2" onSubmit={event => void confirmReport(event, String(selectedDefect.id))}>
+                                            <label className="block text-sm font-bold">Responsible team
+                                                <input required maxLength={120} className="mt-1 min-h-11 w-full rounded border border-slate-400 px-2"
+                                                    value={reviewTeam} onChange={event => setReviewTeam(event.target.value)} />
+                                            </label>
+                                            <label className="block text-sm font-bold">What did the team check?
+                                                <textarea required maxLength={600} className="mt-1 w-full rounded border border-slate-400 p-2"
+                                                    value={reviewNote} onChange={event => setReviewNote(event.target.value)} />
+                                            </label>
+                                            <button type="submit" className="min-h-11 rounded-lg bg-slate-800 px-3 font-bold text-white disabled:opacity-50"
+                                                disabled={!reviewerKey || !!fixingId}>Mark checked</button>
+                                            <button type="submit" value="dismiss" className="ml-2 min-h-11 font-bold underline disabled:opacity-50"
+                                                disabled={!reviewerKey || !!fixingId}>Dismiss report</button>
+                                        </form>}
                                 </div>
                             ) : (
                                 <p className="text-sm text-slate-600 flex items-center gap-2">
@@ -478,6 +533,17 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                         </div>
 
                         {/* Table */}
+                        {awaitingEstimate.length > 0 && <section className="space-y-2 rounded-xl border border-slate-300 p-3">
+                            <h3 className="font-bold">Reports without cost estimates</h3>
+                            <ul className="divide-y divide-slate-200">{awaitingEstimate.map(report => <li key={report.id} id={`row-${report.id}`}
+                                className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                                <button type="button" className="min-h-11 text-left font-bold underline" aria-pressed={selectedId === String(report.id)}
+                                    onClick={() => selectRow(report.id)}>
+                                    {report.location_name} · {report.description}
+                                </button>
+                                <span>{reportStatus(report)}</span>
+                            </li>)}</ul>
+                        </section>}
                         <div className="overflow-x-auto">
                             <table className="w-full text-left border-collapse">
                                 <thead>
@@ -505,7 +571,7 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                                             <td colSpan={7} className="py-12 text-center">
                                                 <Check className="w-8 h-8 mx-auto text-emerald-600" aria-hidden />
                                                 <p className="mt-2 font-bold text-slate-800">
-                                                    {IS_PAGES_PREVIEW ? 'Shared maintenance reports are unavailable in this preview.' : rankedAll.length === 0 ? 'All clear. There are no open defects.' : 'No open defects of this type.'}
+                                                    {IS_PAGES_PREVIEW ? 'Shared maintenance reports are unavailable in this preview.' : defects.length === 0 ? 'All clear. There are no open defects.' : 'No open defects of this type.'}
                                                 </p>
                                             </td>
                                         </tr>

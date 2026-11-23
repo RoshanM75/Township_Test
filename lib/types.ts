@@ -20,6 +20,12 @@ export interface MaintenanceDefect extends ReportMarker {
     edge_id?: number | null;
     location_name?: string | null;
     created_at?: string;
+    asset_id?: string | null;
+    checked_at?: string | null;
+    fixed_at?: string | null;
+    dismissed_at?: string | null;
+    responsible_team?: string | null;
+    review_note?: string | null;
 }
 
 export interface RouteProperties {

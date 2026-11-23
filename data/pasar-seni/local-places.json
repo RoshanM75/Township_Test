@@ -1,0 +1,45 @@
+{
+  "dataset_id": "5f2d6d0cc6663d64f4d078049175d8351f5d13a27d924fdb5b25027e657fc872",
+  "reviewed_on": "2026-11-23",
+  "records": [
+    {
+      "osm": "way/23768012",
+      "publisher": "Central Market Kuala Lumpur",
+      "url": "https://centralmarket.com.my/",
+      "name": "Central Market / Pasar Seni",
+      "address": "Jalan Hang Kasturi, 50050 Kuala Lumpur",
+      "hours": "Mo-Su 10:00-22:00"
+    },
+    {
+      "osm": "way/467354643",
+      "publisher": "Tourism Malaysia",
+      "url": "https://www.malaysia.travel/storage/files/pdf/2026-Malaysia-Surreal-Experience.pdf",
+      "name": "Kasturi Walk",
+      "address": "Jalan Hang Kasturi, Kuala Lumpur"
+    },
+    {
+      "osm": "node/12057352679",
+      "publisher": "DBKL public toilet directory",
+      "url": "https://www.dbkl.gov.my/fasiliti-awam/tandas-awam",
+      "name": "Tandas Awam Jalan Hang Lekir",
+      "address": "Jalan Hang Lekir, Kuala Lumpur"
+    },
+    {
+      "osm": "node/2923152613",
+      "publisher": "Ministry of Health Malaysia",
+      "url": "https://www.moh.gov.my/fasiliti-kesihatan/klinik-kesihatan/wp-kuala-lumpur",
+      "name": "KK Tanglin",
+      "address": "Jalan Cenderasari, 50590 Kuala Lumpur",
+      "phone": "+60326983311"
+    },
+    {
+      "osm": "way/111547419",
+      "publisher": "DBKL public park directory",
+      "url": "https://www.dbkl.gov.my/fasiliti-awam/taman-awam/taman-botani-perdana",
+      "name": "Taman Botani Perdana",
+      "address": "Kuala Lumpur",
+      "hours": "Su-Th 05:30-22:00; Fr-Sa 05:30-24:00",
+      "park_gates": [5629711966, 1632106824, 5625747001, 6246450817, 13688043183, 13688043184]
+    }
+  ]
+}

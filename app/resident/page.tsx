@@ -10,9 +10,9 @@ import {
     AlertTriangle, Phone, MessageCircle, Copy, Volume2, Compass, Bookmark, Route as RouteIcon,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { loadGraph as fetchGraph, loadHazards, loadReports, submitReport, loadWalkingData, loadWeather, loadWeatherWarnings, loadPilotContext } from '@/lib/api';
+import { loadGraph as fetchGraph, loadHazards, loadReports, submitReport, loadWalkingData, loadWeather, loadWeatherWarnings, loadPilotContext, loadCommunityRoutes } from '@/lib/api';
 import { IS_PAGES_PREVIEW, sitePath } from '@/lib/site';
-import type { ReportMarker } from '@/lib/types';
+import type { MaintenanceDefect, ReportMarker } from '@/lib/types';
 import { useClientReady } from '@/lib/use-client-ready';
 import { readWalkParameters } from '@/lib/walk-parameters';
 import { DESTINATIONS } from '@/lib/precinct';
@@ -49,7 +49,10 @@ import PilotSources from '@/components/walking/PilotSources';
 import PilotUnavailable from '@/components/walking/PilotUnavailable';
 import { PILOTS,pilotFromParams,isPilotAvailable,pointInPilot,type PilotId,type PilotContext } from '@/lib/pilots';
 import { usePlannerResult } from '@/lib/use-planner';
-import { metres } from '@/lib/walking-geometry';
+import { metres, pointAt } from '@/lib/walking-geometry';
+import CommunityRoutes from '@/components/walking/CommunityRoutes';
+import type { CommunityRoute } from '@/lib/community-routes';
+import { checkedRouteReports, reportStatus } from '@/lib/report-status';
 
 
 import ResidentMap, { type MapMode } from '@/components/map/ResidentMap';
@@ -82,7 +85,9 @@ const HAZARD_OPTIONS: { kind: HazardKind; label: string; Icon: LucideIcon }[] = 
     { kind: 'light_out', label: 'Broken light', Icon: Lightbulb },
     { kind: 'broken_surface', label: 'Damaged footpath', Icon: AlertTriangle },
     { kind: 'no_ramp', label: 'Missing kerb ramp', Icon: Accessibility },
-    { kind: 'blocked', label: 'Blocked path', Icon: Ban },
+    { kind: 'blocked', label: 'Blocked or unavailable', Icon: Ban },
+    { kind: 'lift_out', label: 'Lift out of service', Icon: Accessibility },
+    { kind: 'details_outdated', label: 'Incorrect place details', Icon: MapPin },
 ];
 
 interface DeviceHazard extends ReportMarker {
@@ -114,6 +119,7 @@ type Prefs = { mapMode: MapMode; scale: TextScale; highContrast: boolean; reduce
 
 const DEFAULT_PREFS: Prefs = { mapMode: '3d', scale: 'normal', highContrast: false, reduceMotion: false, vibrate: true, speak: false };
 const PREFS_KEY = 'townshipgo:prefs';
+const COMMUNITY_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const SCALE_PCT: Record<TextScale, string> = { normal: '100%', large: '112.5%', xlarge: '125%' };
 
 
@@ -179,6 +185,20 @@ function Sheet({ title, onClose, children }: { title: string; onClose: () => voi
             </div>
         </dialog>
     );
+}
+
+function ReportProgress({ report }: { report: MaintenanceDefect }) {
+    const stamp = (value?: string | null) => value ? new Date(value).toLocaleString('en-MY', {
+        timeZone: 'Asia/Kuala_Lumpur', dateStyle: 'medium', timeStyle: 'short',
+    }) : '';
+    return <div className="tg-small space-y-1">
+        <p>{report.location_name} · <strong>{reportStatus(report)}</strong></p>
+        <p>Reported {stamp(report.created_at)}{report.checked_at && ` · Checked ${stamp(report.checked_at)}`}
+            {report.fixed_at && ` · Fixed ${stamp(report.fixed_at)}`}
+            {report.dismissed_at && ` · Dismissed ${stamp(report.dismissed_at)}`}</p>
+        <p>{report.responsible_team || 'Awaiting team assignment'}</p>
+        {report.review_note && <p>{report.review_note}</p>}
+    </div>;
 }
 
 function SettingSwitch({ label, hint, checked, onChange }: {
@@ -248,7 +268,14 @@ function ResidentPageContent() {
     const [nodes, setNodes] = useState<PathNode[]>([]);
     const [edges, setEdges] = useState<PathEdge[]>([]);
     const [hazards, setHazards] = useState<HazardReport[]>([]);
-    const [reports, setReports] = useState<ReportMarker[]>([]);
+    const [reports, setReports] = useState<MaintenanceDefect[]>([]);
+    const [communityRoutes, setCommunityRoutes] = useState<CommunityRoute[]>([]);
+    const [communityId, setCommunityId] = useState(() => {
+        const value = searchParams.get('community');
+        return value && COMMUNITY_ID.test(value) ? value.toLowerCase() : null;
+    });
+    const [communityVersion, setCommunityVersion] = useState(0);
+    const [showCommunity, setShowCommunity] = useState(false);
     const [loadingDb, setLoadingDb] = useState(true);
     const [dataError, setDataError] = useState(false);
     const [reloadVersion, setReloadVersion] = useState(0);
@@ -256,7 +283,7 @@ function ResidentPageContent() {
     const [weather, setWeather] = useState<WalkingWeather | null>(null);
     const [warningFeed, setWarningFeed] = useState<WeatherWarnings | null>(null);
     const [chosenMode, setChosenMode] = useState<Mode | null>(initialWalk.mode);
-    const [step, setStep] = useState<Step>(initialWalk.fromLink||searchParams.get('destId') ? 'route' : 'where');
+    const [step, setStep] = useState<Step>(initialWalk.fromLink||searchParams.get('destId')||communityId ? 'route' : 'where');
     const initialLibrary=boot.collection;
     const [library, setLibrary] = useState<WalkLibrary>(initialLibrary.library);
     const libraryRef = useRef(library);
@@ -276,6 +303,7 @@ function ResidentPageContent() {
     // Hazard reporting
     const [showReportModal, setShowReportModal] = useState(false);
     const [pickingHazard, setPickingHazard] = useState(false);
+    const [reportAsset, setReportAsset] = useState<WalkingAsset | null>(null);
     const [reportPoint, setReportPoint] = useState<[number, number] | null>(null);
     const [reportLocated, setReportLocated] = useState(false);
     const [deviceHazards, setDeviceHazards] = useState(() => readDeviceHazards(area));
@@ -356,7 +384,7 @@ function ResidentPageContent() {
         async function loadGraph() {
             try {
                 const [graphData, hazardData, reportData, walking,context] = await Promise.all([
-                    fetchGraph(area), loadHazards(area), loadReports('open',area), loadWalkingData(area),loadPilotContext(area),
+                    fetchGraph(area), loadHazards(area), loadReports('all',area), loadWalkingData(area),loadPilotContext(area),
                 ]);
                 if (cancelled) return;
                 const mapped = withMappedDetails(graphData.edges, { ...walking,
@@ -380,23 +408,52 @@ function ResidentPageContent() {
             }
         }
 
+        async function refreshReports() {
+            try {
+                const [live, queue] = await Promise.all([loadHazards(area), loadReports('all', area)]);
+                if (!cancelled) {
+                    setHazards(previous => JSON.stringify(previous) === JSON.stringify(live.hazards) ? previous : live.hazards);
+                    setReports(queue.reports);
+                }
+            } catch { /* Keep the last received condition data. */ }
+        }
+
         void refreshWeather();
         void refreshWarnings();
         void loadGraph();
         const timer = window.setInterval(refreshWeather, 15 * 60 * 1000);
         const warningTimer = window.setInterval(refreshWarnings, 5 * 60 * 1000);
+        const reportTimer = IS_PAGES_PREVIEW ? undefined : window.setInterval(refreshReports, 30000);
         return () => {
             cancelled = true;
             window.clearInterval(timer);
             window.clearInterval(warningTimer);
+            window.clearInterval(reportTimer);
         };
     }, [reloadVersion,area]);
+
+    useEffect(() => {
+        if (IS_PAGES_PREVIEW) return;
+        let cancelled = false;
+        async function refresh() {
+            try {
+                const { routes } = await loadCommunityRoutes(area, undefined, communityId ?? undefined);
+                if (!cancelled) setCommunityRoutes(previous => JSON.stringify(previous) === JSON.stringify(routes) ? previous : routes);
+            } catch { /* A temporary service outage leaves the most recent list open. */ }
+        }
+        void refresh();
+        const timer = window.setInterval(refresh, 30000);
+        return () => { cancelled = true; window.clearInterval(timer); };
+    }, [area, communityId, communityVersion]);
 
     /* ---------- Routing ---------- */
     const planningTime = departure ?? planningNow;
     const accessNotices = useMemo(() => activeAccessNotices(edges, sourceWalkingData, planningNow), [edges, sourceWalkingData, planningNow]);
     const nearbyWeatherWarning = warningFeed?.warnings.some(warning => warning.mentions_area && warning.valid_to > planningNow);
-    const walkingData = useMemo(() => sourceWalkingData ? withPersonalUpdates(sourceWalkingData, library.updates, planningTime) : null, [sourceWalkingData, library.updates, planningTime]);
+    const fixedIds = useMemo(() => new Set(reports.filter(report => report.status === 'fixed').map(report => String(report.id))), [reports]);
+    const walkingData = useMemo(() => sourceWalkingData
+        ? withPersonalUpdates(sourceWalkingData, library.updates.filter(update => !update.report_id || !fixedIds.has(update.report_id)), planningTime) : null,
+        [sourceWalkingData, library.updates, fixedIds, planningTime]);
     const slot: TimeSlot = slotForHour(malaysiaHour(planningTime));
     const isNight = slot === 'night';
     const graph = useMemo(() => buildGraph(nodes, edges), [nodes, edges]);
@@ -409,8 +466,10 @@ function ResidentPageContent() {
     const forecast = forecastAt(weather, planningTime);
     const toolRequest = useMemo(() => ({ origin: userCoords, profile, needs, departure_at: planningTime }), [userCoords, profile, needs, planningTime]);
     const planningSnapshot=useMemo(()=>walkingData&&nodes.length?{nodes,edges,walking:walkingData,hazards}:null,[nodes,edges,walkingData,hazards]);
-    const journeySearch = usePlannerResult<JourneyPlan>(planningSnapshot, step !== 'route' ? null : returning
-        ? { type: 'return', input: toolRequest, feels_like: forecast?.feels_like_c }
+    const selectedCommunity = communityRoutes.find(route => route.id === communityId);
+    const journeySearch = usePlannerResult<JourneyPlan>(planningSnapshot, step !== 'route' ? null : communityId
+        ? selectedCommunity ? { type: 'community', input: toolRequest, community: selectedCommunity } : null
+        : returning ? { type: 'return', input: toolRequest, feels_like: forecast?.feels_like_c }
         : destination ? { type: 'journey', input: { ...toolRequest, destination, entrance_id: entranceId || undefined }, feels_like: forecast?.feels_like_c } : null);
     const plan=journeySearch.result;
     const searchTerm = placeQuery.trim().split(',')[0].trim().toLowerCase();
@@ -441,7 +500,12 @@ function ResidentPageContent() {
     }, [reportPoint, graph, edges, area]);
     const localReports = useMemo(() => deviceHazards.filter(report => report.dataset === sourceWalkingData?.dataset_id),
         [deviceHazards, sourceWalkingData?.dataset_id]);
-    const mapReports = useMemo(() => [...reports, ...localReports], [reports, localReports]);
+    const mapReports = useMemo(() => [...reports.filter(report => report.status !== 'fixed'), ...localReports], [reports, localReports]);
+    const reportAssets = useMemo(() => reportPoint ? (sourceWalkingData?.assets ?? []).filter(asset => asset.source !== 'gtfs')
+        .map(asset => ({ asset, distance: metres([asset.lng, asset.lat], [reportPoint[1], reportPoint[0]]) }))
+        .filter(item => item.distance <= 100).sort((a, b) => a.distance - b.distance)
+        .slice(0, 12).map(item => item.asset) : [], [reportPoint, sourceWalkingData]);
+    const activeWalkReports = useMemo(() => walkSession ? checkedRouteReports(walkSession.pack.route, reports) : [], [walkSession, reports]);
 
     const mapRoutes = useMemo(
         () =>
@@ -464,6 +528,7 @@ function ResidentPageContent() {
 
     /* ---------- Things the person does ---------- */
     function chooseDest(id: string) {
+        setCommunityId(null);
         setMapFocus(undefined);
         setReturning(false);
         setChosenMode(null);
@@ -499,6 +564,7 @@ function ResidentPageContent() {
                     return;
                 }
                 initialOriginUsed.current = true;
+                if (communityId) { setCommunityId(null); setStep('where'); }
                 setUserCoords(coords);
                 setMapFocus(undefined);
                 setUsingGPS(true);
@@ -514,12 +580,27 @@ function ResidentPageContent() {
 
     function chooseStart(point: StartPoint) {
         initialOriginUsed.current = true;
+        if (communityId) { setCommunityId(null); setStep('where'); }
         setUserCoords(point.coordinates);
         setUsingGPS(false);
         setGeoMsg(null);
         setMapFocus(undefined);
         setShowStartPicker(false);
         buzz();
+    }
+
+    function selectCommunity(route: CommunityRoute) {
+        if (!route.path) return;
+        setCommunityId(route.id);
+        setUserCoords(route.path.coordinates[0]);
+        setUsingGPS(false);
+        setReturning(false);
+        setChosenMode('direct');
+        setStep('route');
+        setView('plan');
+        setMapFocus(undefined);
+        setShowCommunity(false);
+        setPanelMinimized(false);
     }
 
     async function startWalk() {
@@ -533,11 +614,16 @@ function ResidentPageContent() {
         const now = new Date().toISOString();
         setStartingWalk(true);
         let fresh:JourneyPlan|null=null;
-        try { fresh=await journeySearch.run<JourneyPlan>({type:returning?'return':'journey',input:{...toolRequest,...(destination?{destination}:{}),entrance_id:entranceId||undefined,departure_at:now}}); }
+        try {
+            const input = { ...toolRequest, departure_at: now };
+            fresh = await journeySearch.run<JourneyPlan>(selectedCommunity
+                ? { type: 'community', input, community: selectedCommunity }
+                : { type: returning ? 'return' : 'journey', input: { ...input, ...(destination ? { destination } : {}), entrance_id: entranceId || undefined } });
+        }
         catch{setLibraryMessage('The current route could not be checked. Please refresh and try again.');return;}finally{setStartingWalk(false);}
         const route = fresh?.routes[shownMode];
         if (!route) { setLibraryMessage('This route no longer matches your needs for a walk starting now. Refresh and review the route before setting out.'); return; }
-        const pack = createWalkPack(route, profile, needs, userCoords, edges, walkingData, undefined, networkSnapshot);
+        const pack = createWalkPack(route, profile, needs, selectedCommunity?.path?.coordinates[0] ?? userCoords, edges, walkingData, undefined, networkSnapshot);
         setWalkSession({ id: crypto.randomUUID(), pack, started_at: now, elapsed_ms: 0, track: emptyTrack() });
         setSessionFinished(false); setLivePoint(null); setView('walk');
         setPanelMinimized(true);
@@ -558,13 +644,14 @@ function ResidentPageContent() {
         if (!libraryRef.current.history.some(w => w.id === id)) return false;
         return changeLibrary({ ...libraryRef.current, history: libraryRef.current.history.map(w => w.id === id ? { ...w, feedback } : w) });
     }
-    function planReturn(minutes: number) { setReturning(true); setNeeds(n => ({ ...n, budget_min: minutes })); setEntranceId(''); setChosenMode(null); setStep('route'); setView('plan'); setPanelMinimized(false); }
+    function planReturn(minutes: number) { setCommunityId(null); setReturning(true); setNeeds(n => ({ ...n, budget_min: minutes })); setEntranceId(''); setChosenMode(null); setStep('route'); setView('plan'); setPanelMinimized(false); }
     function focusWalkPoint(point: [number, number]) { setMapFocus(point); requestAnimationFrame(()=>document.querySelector('.tg-map')?.scrollIntoView({block:'center',behavior:prefs.reduceMotion?'auto':'smooth'})); }
     function chooseFacility(asset: WalkingAsset) { chooseDest(asset.external_id || asset.id); setStep('route'); setView('plan'); setPanelMinimized(false); }
     function replanPack(pack: WalkPack) {
         const target=pack.area_id??'elmina';
         if(target!==area){if(walkSession&&!sessionFinished){setLibraryMessage('Finish the current walk before switching areas.');return;}
-            router.replace('/resident?'+new URLSearchParams({area:target,startLat:String(pack.origin[0]),startLng:String(pack.origin[1]),destId:pack.route.destination.external_id||pack.route.destination.id,profile:pack.profile,needs:JSON.stringify(pack.needs),...(pack.route.return_walk?{return:'1'}:{entrance:pack.route.entrance.id})}));return;}
+            router.replace('/resident?'+new URLSearchParams({area:target,startLat:String(pack.origin[0]),startLng:String(pack.origin[1]),destId:pack.route.destination.external_id||pack.route.destination.id,profile:pack.profile,needs:JSON.stringify(pack.needs),...(pack.route.community_id ? { community: pack.route.community_id } : pack.route.return_walk ? {return:'1'} : {entrance:pack.route.entrance.id})}));return;}
+        setCommunityId(pack.route.community_id ?? null);
         setUserCoords(pack.origin); setUsingGPS(false); setProfile(pack.profile); setNeeds(normaliseNeeds(pack.needs));
         setMapFocus(undefined);
         setExactDestination(pack.route.destination.name);
@@ -572,7 +659,7 @@ function ResidentPageContent() {
         setDeparture(new Date().toISOString()); setChosenMode(null); setStep('route'); setView('plan'); setPanelMinimized(false); setReloadVersion(v => v + 1); }
     async function savePack() {
         if (!activeRoute || !walkingData) return;
-        const pack = createWalkPack(activeRoute, profile, needs, userCoords, edges, walkingData, undefined, networkSnapshot);
+        const pack = createWalkPack(activeRoute, profile, needs, selectedCommunity?.path?.coordinates[0] ?? userCoords, edges, walkingData, undefined, networkSnapshot);
         if (!changeLibrary({ ...libraryRef.current, packs: [pack, ...libraryRef.current.packs] })) return;
         setSavingPack(true);
         const ready = await enableOfflineViewer(); setSavingPack(false);
@@ -590,9 +677,14 @@ function ResidentPageContent() {
     async function shareUpdate(update: ConditionUpdate) {
         if (IS_PAGES_PREVIEW) return false;
         try {
-            const response = await fetch(sitePath('/api/condition-updates'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(update) });
-            if (!response.ok) return false;
-            const next = { ...libraryRef.current, updates: libraryRef.current.updates.map(u => u.id === update.id ? { ...u, shared_at: new Date().toISOString() } : u) };
+            const asset = update.target_type === 'facility' ? sourceWalkingData?.assets.find(item => item.id === update.target_id) : null;
+            const edge = edges.find(item => String(item.id) === update.target_id && update.target_type !== 'facility');
+            if (!asset && !edge) return false;
+            const [lng, lat] = asset ? [asset.lng, asset.lat] : pointAt(edge!.geometry, .5);
+            const { report } = await submitReport({ area_id: area, lat, lng, edge_id: edge?.id, asset_id: asset?.id,
+                kind: update.kind === 'seat_unavailable' ? 'blocked' : update.kind, description: update.notes });
+            const next = { ...libraryRef.current, updates: libraryRef.current.updates.map(u => u.id === update.id
+                ? { ...u, shared_at: new Date().toISOString(), report_id: String(report.id) } : u) };
             if (!changeLibrary(next)) { libraryRef.current = next; setLibrary(next); setLibraryMessage('The report was shared, but this browser could not update its device copy.'); }
             setReloadVersion(v => v + 1); return true;
         } catch { return false; }
@@ -617,7 +709,7 @@ function ResidentPageContent() {
 
     function openShare() {
         const captured = view === 'walk' ? walkSession?.pack : undefined;
-        const origin = captured?.origin ?? userCoords;
+        const origin = captured?.origin ?? selectedCommunity?.path?.coordinates[0] ?? userCoords;
         const sharedRoute = captured?.route ?? activeRoute;
         const params = new URLSearchParams({
             area,
@@ -628,6 +720,7 @@ function ResidentPageContent() {
             profile: captured?.profile ?? profile,
             needs: JSON.stringify(captured?.needs ?? needs),
             departure: sharedRoute?.departure_at ?? planningTime,
+            ...(sharedRoute?.community_id ? { community: sharedRoute.community_id } : {}),
             ...(sharedRoute?.return_walk ? { return: '1' } : {}),
             ...(sharedRoute && !sharedRoute.return_walk ? { entrance: sharedRoute.entrance.id } : {}),
         });
@@ -657,6 +750,8 @@ function ResidentPageContent() {
 
     /* ---------- Reporting a problem ---------- */
     function openReport() {
+        setReportAsset(null);
+        if (selectedKind === 'lift_out' || selectedKind === 'details_outdated') setSelectedKind('broken_surface');
         setReportPoint(livePoint ?? (usingGPS ? userCoords : null));
         setReportMsg(null);
         setSearchOpen(false);
@@ -664,7 +759,18 @@ function ResidentPageContent() {
         buzz();
     }
 
+    function openAssetReport(asset: WalkingAsset) {
+        if (asset.source === 'gtfs') return;
+        setReportAsset(asset);
+        setReportPoint([asset.lat, asset.lng]);
+        setSelectedKind(asset.kind === 'destination' ? 'details_outdated' : 'blocked');
+        setReportMsg(null);
+        setShowReportModal(true);
+    }
+
     function chooseReportPoint(lat: number, lng: number) {
+        setReportAsset(null);
+        if (selectedKind === 'lift_out' || selectedKind === 'details_outdated') setSelectedKind('blocked');
         setReportPoint([lat, lng]);
         setReportMsg(null);
         setPickingHazard(false);
@@ -678,6 +784,8 @@ function ResidentPageContent() {
         }
         setReportLocated(true);
         navigator.geolocation.getCurrentPosition(position => {
+            setReportAsset(null);
+            if (selectedKind === 'lift_out' || selectedKind === 'details_outdated') setSelectedKind('blocked');
             setReportPoint([position.coords.latitude, position.coords.longitude]);
             setReportMsg(null);
             setReportLocated(false);
@@ -705,7 +813,7 @@ function ResidentPageContent() {
     }
 
     async function submitCapexDefect() {
-        if (!reportEdge || !reportPoint || isSubmittingReport) return;
+        if ((!reportEdge && !reportAsset) || !reportPoint || isSubmittingReport) return;
         setReportMsg(null);
         setIsSubmittingReport(true);
         const [lat, lng] = reportPoint;
@@ -713,17 +821,18 @@ function ResidentPageContent() {
             if (IS_PAGES_PREVIEW) {
                 const category = HAZARD_OPTIONS.find(option => option.kind === selectedKind)!.label;
                 updateDeviceHazards([{ id: crypto.randomUUID(), lat, lng, category, description: reportNotes.trim(),
-                    location: reportEdge.name ?? 'Mapped footpath', dataset: sourceWalkingData?.dataset_id,
+                    location: reportAsset?.name ?? reportEdge?.name ?? 'Mapped footpath', dataset: sourceWalkingData?.dataset_id,
                     ...(reportPhoto ? { photo: reportPhoto } : {}) },
                 ...deviceHazards]);
                 setReportMsg('Saved on this device.');
                 speak('Your report was saved on this device.');
             } else {
                 const { hazard, report } = await submitReport({
-                    area_id: area, edge_id: reportEdge.id, lat, lng, kind: selectedKind, description: reportNotes,
+                    area_id: area, edge_id: reportAsset ? undefined : reportEdge?.id, asset_id: reportAsset?.id, lat, lng, kind: selectedKind, description: reportNotes,
                 });
                 setHazards(previous => [...previous, hazard]);
                 setReports(previous => [report, ...previous]);
+                setReloadVersion(value => value + 1);
                 setReportMsg('Report sent to the maintenance queue.');
                 speak('Your report was sent.');
             }
@@ -731,6 +840,8 @@ function ResidentPageContent() {
             setAutoNote(null);
             setReportPhoto(null);
             setReportPoint(null);
+            setReportAsset(null);
+            if (selectedKind === 'lift_out' || selectedKind === 'details_outdated') setSelectedKind('blocked');
             buzz(120);
         } catch (error) {
             setReportMsg(IS_PAGES_PREVIEW ? 'Could not save this report on your device.'
@@ -768,7 +879,7 @@ function ResidentPageContent() {
     /* ---------- Derived display values ---------- */
     const selectedStart = startPoints.find(point => Math.abs(point.coordinates[0] - userCoords[0]) < 1e-7
         && Math.abs(point.coordinates[1] - userCoords[1]) < 1e-7);
-    const originLabel = usingGPS ? 'Your location' : selectedStart?.label ?? (loadingDb ? configuration.origin_label : 'Your chosen starting point');
+    const originLabel = selectedCommunity ? 'Community route start' : usingGPS ? 'Your location' : selectedStart?.label ?? (loadingDb ? configuration.origin_label : 'Your chosen starting point');
 
     function selectSearchResult(place: WalkingAsset) {
         chooseDest(place.external_id || place.id);
@@ -786,6 +897,10 @@ function ResidentPageContent() {
         <DepartureControl departure={planningTime} onChange={value => { setDeparture(value); setChosenMode(null); }} onNow={() => { setDeparture(null);setPlanningNow(new Date().toISOString()); setReloadVersion(v => v + 1); }} forecast={forecast} />
     </div>;
 
+    const communityButton = <button type="button" className="tg-btn" disabled={!walkingData?.dataset_id}
+        onClick={() => setShowCommunity(true)}><RouteIcon size={18} aria-hidden />Community routes</button>;
+    const localPlaces = <PlaceDiscovery snapshot={planningSnapshot} request={toolRequest} budget={needs.budget_min}
+        onChoose={selectSearchResult} onReport={openAssetReport} />;
     const quickUpdate = <QuickConditionUpdate area={area} dataset={walkingData?.dataset_id} edges={edges.filter(e => activeRoute?.edge_ids.includes(e.id))} facilities={walkingData?.assets ?? []} onSave={saveUpdate} onShare={shareUpdate} />;
 
     /* ---------------------------------------------------------------- */
@@ -860,8 +975,8 @@ function ResidentPageContent() {
                     activeRouteId={activeRoute?.mode ?? ''}
                     reports={mapReports}
                     assets={mapAssets}
-                    startCoords={view === 'walk' && walkSession ? walkSession.pack.origin : userCoords}
-                    endCoords={activeRoute ? [activeRoute.entrance.lat, activeRoute.entrance.lng] : step === 'route' && destination && !returning ? currentDest.coords : undefined}
+                    startCoords={view === 'walk' && walkSession ? walkSession.pack.origin : selectedCommunity?.path?.coordinates[0] ?? userCoords}
+                    endCoords={activeRoute ? [activeRoute.entrance.lat, activeRoute.entrance.lng] : step === 'route' && destination && !returning && !communityId ? currentDest.coords : undefined}
                     startLabel={usingGPS ? 'You' : 'Start'}
                     reduceMotion={prefs.reduceMotion}
                     highContrast={prefs.highContrast}
@@ -879,19 +994,22 @@ function ResidentPageContent() {
             </div>
 
             <section id="walk-planning" aria-label="Walk planning" tabIndex={-1} className="tg-sheet">
-                {view !== 'saved' && !pickingHazard && <PanelGrip state={panelState} walk={view === 'walk'} onChange={setPanelState} />}
+                {view !== 'saved' && !pickingHazard && <PanelGrip state={panelState} walk={view === 'walk'}
+                    warning={view === 'walk' && !sessionFinished && activeWalkReports.length > 0} onChange={setPanelState} />}
                 <div id="walking-panel" className="tg-panel-body">
                 {libraryMessage && <div role="status" className="tg-note mb-3"><p>{libraryMessage}</p><button className="min-h-11 text-sm font-bold underline" onClick={() => setLibraryMessage(null)}>Dismiss message</button></div>}
                 {!!accessNotices.length && <div className="mb-3"><AccessNotices notices={accessNotices} onFocus={focusWalkPoint} /></div>}
                 {nearbyWeatherWarning && (view !== 'plan' || step !== 'where') && <div className="mb-3"><WeatherWarningList feed={warningFeed} now={planningNow} /></div>}
                 {view === 'explore' && <div className="tg-stack">
+                    {communityButton}
+                    {localPlaces}
                     {pilotData && area !== 'elmina' && <TransitNearby context={pilotData} assets={walkingData?.assets ?? []} origin={userCoords} at={planningTime}
                         onChoose={selectSearchResult} onFocus={focusWalkPoint} />}
                     <ExploreWalks nodes={nodes} edges={edges} data={walkingData} request={toolRequest} hazards={hazards} onChoose={chooseFacility} onReturn={planReturn}
                     onLocate={handleGetLocation} locating={geoBusy} locationLabel={originLabel} locationMessage={geoMsg}
                     onLastPosition={livePoint ? () => { setUserCoords(livePoint); setUsingGPS(true); setGeoMsg('Using your last recorded GPS fix. Refresh your location if you have moved since then.'); } : undefined} />
                     </div>}
-                {view === 'saved' && <SavedWalks library={library} profile={profile} pace={needs.speed_mps} onChange={changeLibrary} onReplan={replanPack} onFeedback={saveFeedback}
+                {view === 'saved' && <SavedWalks library={library} profile={profile} pace={needs.speed_mps} area={area} reports={reports} onChange={changeLibrary} onReplan={replanPack} onFeedback={saveFeedback}
                     onUsePace={speed => { setNeeds(n => ({ ...n, speed_mps: speed })); setLibraryMessage('Your personal pace is selected for this walking profile.'); }} onShare={shareUpdate} />}
                 {view === 'walk' && !walkSession && <div className="tg-stack"><h1 className="tg-h2">Ready when you are</h1><p className="tg-small">Choose and review a route first. During the walk you can pause, optionally record GPS, and save how it felt.</p><button className="tg-btn tg-btn-primary" onClick={() => { setView('plan'); setStep('where'); }}>Plan a walk</button></div>}
 
@@ -900,6 +1018,9 @@ function ResidentPageContent() {
                         {suggestedPlaces.length > 0 && <div className="tg-suggestions" aria-label="Suggested destinations">
                             {suggestedPlaces.map(place => <button key={place.id} type="button" onClick={() => selectSearchResult(place)}><MapPin size={15} aria-hidden />{place.name}</button>)}
                         </div>}
+                        {planningControls}
+                        {localPlaces}
+                        {communityButton}
                         <WeatherStrip weather={weather} now={planningNow} />
                         <WeatherWarningList feed={warningFeed} now={planningNow} />
                         {pilotData && area !== 'elmina' && <TransitNearby context={pilotData} assets={walkingData?.assets ?? []} origin={userCoords} at={planningTime}
@@ -913,11 +1034,9 @@ function ResidentPageContent() {
                                         {profile === p && <Check size={18} aria-hidden />}{PROFILES[p].label}
                                     </button>)}
                                 </div>
-                                {planningControls}
                                 <PaceCalibration history={library.history} profile={profile} current={needs.speed_mps} onUse={speed => setNeeds(n => ({ ...n, speed_mps: speed }))} />
                                 <div className="grid grid-cols-2 gap-2">{[15,30].map(n => <button className="tg-btn" key={n} onClick={() => planReturn(n)}>Return walk · {n} min</button>)}</div>
                                 {destination && <button className="tg-btn tg-btn-primary" onClick={() => selectSearchResult(destination)}>Plan to {destination.name}</button>}
-                                <PlaceDiscovery snapshot={planningSnapshot} request={toolRequest} budget={needs.budget_min} onChoose={selectSearchResult} />
                                 <button type="button" className="tg-text-action text-left" onClick={() => setReloadVersion(version => version + 1)}>Refresh paths and checks</button>
                                 <Link href={`/verification?area=${area}`} className="inline-flex min-h-11 items-center font-bold underline">Places and verification coverage</Link>
                                 <PilotSources area={area} context={pilotData??undefined} />
@@ -931,9 +1050,9 @@ function ResidentPageContent() {
                         <div className="tg-sheet-row">
                             <div className="min-w-0">
                                 <h1 className="tg-h2">Choose a route</h1>
-                                <p className="tg-small truncate">{returning ? 'Return to your starting point' : `To ${currentDest.name}`}</p>
+                                <p className="tg-small truncate">{communityId ? selectedCommunity?.title ?? 'Community route' : returning ? 'Return to your starting point' : `To ${currentDest.name}`}</p>
                             </div>
-                            <button type="button" aria-label="Close route options" className="tg-close" onClick={() => { setStep('where'); setPanelMinimized(false); }}><X size={21} aria-hidden /></button>
+                            <button type="button" aria-label="Close route options" className="tg-close" onClick={() => { setCommunityId(null); setStep('where'); setPanelMinimized(false); }}><X size={21} aria-hidden /></button>
                         </div>
                         {loadingDb || journeySearch.pending ? (
                             <p className="tg-note" role="status">{loadingDb ? 'Loading footpaths…' : 'Finding walking routes…'}</p>
@@ -941,7 +1060,7 @@ function ResidentPageContent() {
                             <div className="tg-note tg-warnbox" role="status">
                                 <RouteQualityBar />
                                 {plan?.reasons.map(reason => <p key={reason} className="mt-2">{reason}</p>)}
-                                {!plan && <p>{journeySearch.error || 'Choose a mapped place to plan a trip.'}</p>}
+                                {!plan && <p>{journeySearch.error || (communityId ? 'This community route is unavailable for planning. Check the community routes list for its status.' : 'Choose a mapped place to plan a trip.')}</p>}
                             </div>
                         ) : (
                             <div role="group" aria-label="Route choices" className="tg-route-grid">
@@ -968,7 +1087,7 @@ function ResidentPageContent() {
                             <summary>Route details and walking preferences</summary>
                             <div className="tg-stack mt-3">
                                 {planningControls}
-                                {!returning && entrances.length > 0 && <label className="tg-label">Arrival access point
+                                {!returning && !communityId && entrances.length > 0 && <label className="tg-label">Arrival access point
                                     <select className="tg-input" value={entranceId} onChange={event => { setEntranceId(event.target.value); setChosenMode(null); }}>
                                         <option value="">Best available access point</option>
                                         {entrances.filter(entrance => entrance.edge_id !== null).map(entrance => <option key={entrance.id} value={entrance.id}>
@@ -1000,6 +1119,13 @@ function ResidentPageContent() {
                     <WalkRecorder key={walkSession.id} session={walkSession} onComplete={finishRecording} onFeedback={saveFeedback} onPosition={setLivePoint}
                         onNewWalk={() => { setWalkSession(null); setLivePoint(null); setView('plan'); setStep('where'); setPanelMinimized(false); }} />
                     {!sessionFinished && <div className="tg-stack mt-4">
+                        {activeWalkReports.length > 0 && <div role="status" className="tg-note tg-warnbox">
+                            <p className="font-bold">Checked reports on your walk</p>
+                            <ul className="list-disc pl-5">{activeWalkReports.map(report => <li key={report.id}>
+                                {report.location_name} · {report.description}
+                            </li>)}</ul>
+                            <button type="button" className="tg-text-action" onClick={() => replanPack(walkSession.pack)}>Review routes with current conditions</button>
+                        </div>}
                         <details className="rounded-xl border border-slate-300 p-3"><summary className="min-h-8 cursor-pointer font-bold">Your original walk plan</summary><p className="tg-small mt-2">Planned at {new Date(walkSession.pack.route.departure_at).toLocaleTimeString('en-MY',{timeZone:'Asia/Kuala_Lumpur',hour:'2-digit',minute:'2-digit'})} Malaysia time. This plan stays fixed while you record; pause and review if conditions change.</p><RouteQualityBar route={walkSession.pack.route} /><WalkTimeline route={walkSession.pack.route} edges={walkSession.pack.edges} records={walkingData?.verifications ?? []} onFocus={focusWalkPoint} /></details>
                         {quickUpdate}
                         <button className="tg-btn" onClick={openReport}><AlertTriangle size={22} aria-hidden />Report a hazard</button>
@@ -1019,6 +1145,12 @@ function ResidentPageContent() {
             }}><Icon size={21} aria-hidden />{label}{id === 'walk' && walkSession && !sessionFinished ? ' •' : ''}</button>)}<button type="button" onClick={openReport}><AlertTriangle size={21} aria-hidden />Reports</button></nav>
 
             {/* ---------------- Dialogs ---------------- */}
+
+            {showCommunity && walkingData?.dataset_id && <Sheet title="Community routes" onClose={() => setShowCommunity(false)}>
+                <CommunityRoutes area={area} dataset={walkingData.dataset_id} graph={{ nodes, edges }} walks={library.history}
+                    startPoints={startPoints} routes={communityRoutes} now={planningNow} onPlan={selectCommunity}
+                    onShared={() => setCommunityVersion(value => value + 1)} />
+            </Sheet>}
 
             {showStartPicker && (
                 <Sheet title="Choose a starting point" onClose={() => setShowStartPicker(false)}>
@@ -1141,7 +1273,8 @@ function ResidentPageContent() {
                         <fieldset>
                             <legend className="tg-label mb-2">What’s the hazard?</legend>
                             <div className="tg-report-categories">
-                                {HAZARD_OPTIONS.map(({ kind, label, Icon }) => <label key={kind}>
+                                {HAZARD_OPTIONS.filter(option => option.kind === 'lift_out' ? reportAsset?.kind === 'entrance'
+                                    : option.kind !== 'details_outdated' || reportAsset).map(({ kind, label, Icon }) => <label key={kind}>
                                     <input className="sr-only" type="radio" name="report-kind" value={kind} checked={selectedKind === kind}
                                         onChange={() => { setSelectedKind(kind); buzz(); }} />
                                     <span><Icon size={18} aria-hidden />{label}</span>
@@ -1151,9 +1284,23 @@ function ResidentPageContent() {
                         <div className="tg-report-location">
                             <p className="tg-label">Incident location</p>
                             <p className="flex items-center gap-2 text-sm"><MapPin size={18} aria-hidden />
-                                {reportPoint ? reportEdge ? `${reportEdge.name || 'Mapped footpath'} · ${reportPoint.map(value => value.toFixed(5)).join(', ')}`
+                                {reportAsset ? reportAsset.name : reportPoint ? reportEdge ? `${reportEdge.name || (reportEdge.is_crossing ? 'Mapped crossing' : 'Mapped footpath')} · ${reportPoint.map(value => value.toFixed(5)).join(', ')}`
                                     : 'Choose a point near a mapped path in this area.' : 'Choose where you saw the hazard.'}
                             </p>
+                            {(reportAssets.length > 0 || reportAsset) && <label className="tg-label">What is affected?
+                                <select className="tg-input" value={reportAsset?.id ?? ''} onChange={event => {
+                                    const asset = reportAssets.find(item => item.id === event.target.value);
+                                    setReportAsset(asset ?? null);
+                                    if (asset) setReportPoint([asset.lat, asset.lng]);
+                                    if ((!asset && selectedKind === 'details_outdated') || (asset?.kind !== 'entrance' && selectedKind === 'lift_out')) {
+                                        setSelectedKind('blocked');
+                                    }
+                                }}>
+                                    <option value="">Path or crossing at the pin</option>
+                                    {reportAsset && !reportAssets.some(item => item.id === reportAsset.id) && <option value={reportAsset.id}>{reportAsset.name}</option>}
+                                    {reportAssets.map(asset => <option key={asset.id} value={asset.id}>{asset.name} · {asset.kind}</option>)}
+                                </select>
+                            </label>}
                             <div className="grid grid-cols-2 gap-2">
                                 <button type="button" className="tg-btn" onClick={() => { setShowReportModal(false); if (view === 'saved') setView('plan'); setPickingHazard(true); }}>Pick on map</button>
                                 <button type="button" className="tg-btn" disabled={reportLocated} onClick={locateReport}>{reportLocated ? 'Finding…' : 'My location'}</button>
@@ -1165,18 +1312,20 @@ function ResidentPageContent() {
                         <label className="tg-label">Details (optional)<textarea className="tg-input mt-1" value={reportNotes} maxLength={500}
                             onChange={event => setReportNotes(event.target.value)} placeholder="For example, a loose slab beside the crossing" /></label>
                         {reportMsg && <p className="tg-note" role="status">{reportMsg}</p>}
-                        <button type="submit" className="tg-btn tg-btn-primary" disabled={loadingDb || isSubmittingReport || !reportEdge}>
+                        <button type="submit" className="tg-btn tg-btn-primary" disabled={loadingDb || isSubmittingReport || (!reportEdge && !reportAsset)
+                            || (selectedKind === 'lift_out' && reportAsset?.kind !== 'entrance') || (selectedKind === 'details_outdated' && !reportAsset)}>
                             <Send size={18} aria-hidden /> {isSubmittingReport ? 'Saving…' : IS_PAGES_PREVIEW ? 'Save report' : 'Submit report'}
                         </button>
                     </form>
                     {(IS_PAGES_PREVIEW ? deviceHazards.length > 0 : reports.length > 0) && <details className="tg-details mt-3" open={Boolean(reportMsg)}>
-                        <summary>{IS_PAGES_PREVIEW ? `Saved on this device (${deviceHazards.length})` : `Open area reports (${reports.length})`}</summary>
+                        <summary>{IS_PAGES_PREVIEW ? `Saved on this device (${deviceHazards.length})` : `Area reports and fixes (${reports.length})`}</summary>
                         <ul className="tg-report-list">
                             {(IS_PAGES_PREVIEW ? deviceHazards : reports).map((report, index) => <li key={report.id ?? index}>
                                 {/* eslint-disable-next-line @next/next/no-img-element -- photo stored on this device as a data URL */}
                                 {'photo' in report && typeof report.photo === 'string' && <img className="tg-report-photo" src={report.photo} alt="" />}
                                 <strong>{report.category || 'Reported hazard'}</strong>
                                 {report.description && <p>{report.description}</p>}
+                                {'status' in report && <ReportProgress report={report} />}
                                 {'location' in report && typeof report.location === 'string' && <p>{report.location}</p>}
                                 {IS_PAGES_PREVIEW && <button type="button" className="tg-text-action" onClick={() => {
                                     try { updateDeviceHazards(deviceHazards.filter(saved => saved.id !== report.id)); }

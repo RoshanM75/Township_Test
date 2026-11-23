@@ -155,3 +155,52 @@ CREATE INDEX IF NOT EXISTS idx_walking_assets_area ON walking_assets(area_id,id)
 CREATE INDEX IF NOT EXISTS idx_verification_area ON verification_records(area_id,target_type,target_id);
 CREATE INDEX IF NOT EXISTS idx_hazard_area ON hazard_reports(area_id,status);
 CREATE INDEX IF NOT EXISTS idx_defect_area ON defect_reports(area_id,status);
+
+-- Reports can attach to a named asset without closing the adjacent footpath.
+ALTER TABLE hazard_reports ADD COLUMN IF NOT EXISTS asset_id BIGINT REFERENCES walking_assets(id);
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS asset_id BIGINT REFERENCES walking_assets(id);
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS checked_at TIMESTAMPTZ;
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS fixed_at TIMESTAMPTZ;
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS responsible_team TEXT;
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS review_note TEXT;
+ALTER TABLE hazard_reports ALTER COLUMN edge_id DROP NOT NULL;
+ALTER TABLE defect_reports ALTER COLUMN edge_id DROP NOT NULL;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='hazard_reports_has_target' AND conrelid='hazard_reports'::regclass) THEN
+        ALTER TABLE hazard_reports ADD CONSTRAINT hazard_reports_has_target CHECK (edge_id IS NOT NULL OR asset_id IS NOT NULL);
+        ALTER TABLE defect_reports ADD CONSTRAINT defect_reports_has_target CHECK (edge_id IS NOT NULL OR asset_id IS NOT NULL);
+    END IF;
+END $$;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'hazard_reports_kind_check'
+        AND conrelid = 'hazard_reports'::regclass AND strpos(pg_get_constraintdef(oid),'lift_out') > 0) THEN
+        ALTER TABLE hazard_reports DROP CONSTRAINT IF EXISTS hazard_reports_kind_check;
+        ALTER TABLE hazard_reports ADD CONSTRAINT hazard_reports_kind_check
+            CHECK (kind IN ('blocked', 'no_ramp', 'light_out', 'no_shade', 'broken_surface', 'lift_out', 'details_outdated'));
+    END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS community_routes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    submission_id UUID NOT NULL,
+    area_id TEXT NOT NULL CHECK (area_id IN ('elmina','pasar-seni','um-campus')),
+    dataset_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    notes TEXT NOT NULL,
+    points JSONB NOT NULL CHECK (jsonb_typeof(points) = 'array'),
+    matched_path JSONB,
+    status TEXT NOT NULL DEFAULT 'submitted' CHECK (status IN ('submitted','published','verified','declined')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    published_at TIMESTAMPTZ,
+    checked_at TIMESTAMPTZ,
+    valid_until TIMESTAMPTZ,
+    reviewer TEXT,
+    review_note TEXT,
+    UNIQUE (area_id, submission_id)
+);
+CREATE INDEX IF NOT EXISTS idx_community_routes_area_status ON community_routes(area_id,status,created_at DESC);
+
+ALTER TABLE community_routes ADD COLUMN IF NOT EXISTS opening_hours TEXT;
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS dismissed_at TIMESTAMPTZ;

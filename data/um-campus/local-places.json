@@ -1,0 +1,64 @@
+{
+  "dataset_id": "6bb32d9742651f0795d624ba20848b7129879cdf83bb57bbe3be2e130c5ce5fc",
+  "reviewed_on": "2026-11-23",
+  "records": [
+    {
+      "osm": "way/263611204",
+      "publisher": "Universiti Malaya Library",
+      "url": "https://umlib.um.edu.my/opening-hours-amp-locations",
+      "name": "Central Library",
+      "address": "Universiti Malaya, 50603 Lembah Pantai, Kuala Lumpur",
+      "phone": "+60379567800",
+      "hours": "Mo-Fr 08:00-22:00; Sa-Su 09:00-16:00",
+      "closed_holidays": true,
+      "visit_note": "Check the library’s visitor requirements before you go."
+    },
+    {
+      "osm": "node/11375642390",
+      "publisher": "Universiti Malaya Library",
+      "url": "https://umlib.um.edu.my/opening-hours-amp-locations",
+      "name": "T. J. Danaraj Medical Library",
+      "address": "Faculty of Medicine, Universiti Malaya",
+      "phone": "+60379674783",
+      "hours": "Mo-Fr 08:00-20:00; Sa-Su 09:00-16:00",
+      "closed_holidays": true
+    },
+    {
+      "osm": "way/995983168",
+      "publisher": "Universiti Malaya Library",
+      "url": "https://umlib.um.edu.my/opening-hours-amp-locations",
+      "name": "Perpustakaan Peringatan Za’ba",
+      "phone": "+60379673847"
+    },
+    {
+      "osm": "node/9202935651",
+      "publisher": "Universiti Malaya Library",
+      "url": "https://umlib.um.edu.my/opening-hours-amp-locations",
+      "name": "Built Environment Library",
+      "address": "Mercu Alam Bina, Faculty of Built Environment, Universiti Malaya",
+      "phone": "+60379676802",
+      "hours": "Mo-Th 08:00-16:00; Fr 08:00-12:00",
+      "closed_holidays": true
+    },
+    {
+      "osm": "node/9318634845",
+      "publisher": "Universiti Malaya Student Affairs",
+      "url": "https://hep.um.edu.my/KLINIK%20KESIHATAN%20UM/SKIM%20PERUBATAN%20KESIHATAN%20%28GL%29.pdf",
+      "name": "Klinik Kesihatan Pelajar",
+      "visit_note": "Student health clinic. Check eligibility and current service hours with Universiti Malaya."
+    },
+    {
+      "osm": "node/9271020817",
+      "publisher": "Universiti Malaya",
+      "url": "https://www.um.edu.my/perdanasiswa-complex",
+      "name": "Perdanasiswa Complex",
+      "visit_note": "The complex has eateries, ATMs and a post office."
+    },
+    {
+      "osm": "way/555194631",
+      "publisher": "Universiti Malaya",
+      "url": "https://www.um.edu.my/tasek-varsiti",
+      "name": "Tasek Varsiti"
+    }
+  ]
+}

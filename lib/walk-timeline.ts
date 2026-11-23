@@ -3,7 +3,10 @@ import type { PathEdge } from './routing.ts';
 import { evidenceFor } from './verification.ts';
 
 export interface TimelineItem { id: string; title: string; detail: string; start_min: number; end_min: number; distance_m: number; point: [number, number]; kind: 'path' | 'crossing' | 'rest' | 'connection' | 'turn' | 'arrival' }
-export function walkTimeline(route: JourneyRoute, edges: PathEdge[], records: VerificationRecord[]): TimelineItem[] {
+export type WalkLanguage = 'en' | 'ms';
+
+export function walkTimeline(route: JourneyRoute, edges: PathEdge[], records: VerificationRecord[], language: WalkLanguage = 'en'): TimelineItem[] {
+    const say = (en: string, ms: string) => language === 'ms' ? ms : en;
     const lookup = new Map(edges.map(e => [e.id, e]));
     const result: TimelineItem[] = [];
     for (const [index, step] of (route.steps ?? []).entries()) {
@@ -13,30 +16,40 @@ export function walkTimeline(route: JourneyRoute, edges: PathEdge[], records: Ve
         const slope = evidence.slope_pct ? evidence.slope_pct.value : edge?.slope_pct;
         const describe = (key: 'has_kerb_ramp' | 'has_tactile' | 'audible_signal' | 'ped_green_s' | 'clear_width_m', name: string, unit = '') => {
             const fact = evidence[key];
-            if (fact?.status === 'stale') return `${name} check overdue`;
+            if (fact?.status === 'stale') return say(`${name} check overdue`, `${name} perlu disemak semula`);
             const value = fact?.value ?? edge?.[key];
             if (value === null || value === undefined) return '';
-            const rendered = typeof value === 'boolean' ? (value ? 'yes' : 'no') : `${value}${unit}`;
-            return `${name} ${rendered} (${fact?.status === 'verified' ? 'checked' : fact?.status === 'reported' ? 'reported' : 'mapped'})`;
+            const rendered = typeof value === 'boolean' ? (value ? say('yes', 'ya') : say('no', 'tidak')) : `${value}${unit}`;
+            return `${name} ${rendered} (${fact?.status === 'verified' ? say('checked', 'disemak') : fact?.status === 'reported' ? say('reported', 'dilaporkan') : say('mapped', 'dipetakan')})`;
         };
         const kind = step.kind === 'turn' ? 'turn' : step.kind === 'rest' ? 'rest' : step.kind === 'connection' ? 'connection' : edge?.is_crossing ? 'crossing' : 'path';
-        const title = kind === 'crossing' ? `Crossing · ${step.name}` : kind === 'rest' ? `Rest · ${step.name}` : step.name.startsWith('Footpath ') ? 'Follow the mapped footpath' : step.name;
-        const detail = kind === 'turn' ? 'Follow the return path. Your planned rest intervals still apply.' : kind === 'rest' ? 'Planned rest, including the connection to the facility' : kind === 'connection' ? 'Check the connection on site'
-            : [covered === true ? 'Roof cover recorded' : covered === false ? 'No roof cover recorded' : 'Roof cover unknown',
-                typeof slope === 'number' ? `Slope ${slope}%` : 'Slope unknown',
-                describe('clear_width_m', 'Clear width', ' m'),
+        const title = kind === 'crossing' ? `${say('Crossing', 'Lintasan')} · ${step.name}`
+            : kind === 'rest' ? `${say('Rest', 'Rehat')} · ${step.name}`
+            : kind === 'turn' ? say(step.name, 'Mula perjalanan pulang')
+            : step.name.startsWith('Footpath ') ? say('Follow the mapped footpath', 'Ikut laluan pejalan kaki pada peta') : step.name;
+        const detail = kind === 'turn' ? say('Follow the return path. Your planned rest intervals still apply.',
+            'Ikut laluan pulang dan teruskan rehat mengikut jadual.')
+            : kind === 'rest' ? say('Planned rest, including the connection to the facility', 'Rehat terancang termasuk laluan ke tempat rehat')
+            : kind === 'connection' ? say('Check the connection on site', 'Semak sambungan laluan di lokasi')
+            : [covered === true ? say('Roof cover recorded', 'Bumbung direkodkan')
+                : covered === false ? say('No roof cover recorded', 'Tiada bumbung direkodkan') : say('Roof cover unknown', 'Maklumat bumbung belum diketahui'),
+                typeof slope === 'number' ? `${say('Slope', 'Kecerunan')} ${slope}%` : say('Slope unknown', 'Kecerunan belum diketahui'),
+                describe('clear_width_m', say('Clear width', 'Lebar laluan bebas halangan'), ' m'),
                 ...(kind === 'crossing' ? [
-                    evidence.crossing_type?.status === 'verified' ? 'Crossing type currently checked' : 'Crossing needs confirmation',
-                    describe('has_kerb_ramp', 'Kerb ramps'), describe('has_tactile', 'Tactile paving'),
-                    describe('audible_signal', 'Audible signal'), describe('ped_green_s', 'Green phase', ' s'),
+                    evidence.crossing_type?.status === 'verified' ? say('Crossing type currently checked', 'Jenis lintasan telah disemak')
+                        : say('Crossing needs confirmation', 'Lintasan perlu disahkan'),
+                    describe('has_kerb_ramp', say('Kerb ramps', 'Ramp bebendul')),
+                    describe('has_tactile', say('Tactile paving', 'Jubin taktil')),
+                    describe('audible_signal', say('Audible signal', 'Isyarat bunyi')),
+                    describe('ped_green_s', say('Green phase', 'Tempoh lampu hijau'), ' s'),
                 ] : [])].filter(Boolean).join(' · ');
         const previous = result.at(-1);
         if (previous && kind === 'path' && previous.kind === kind && previous.title === title && previous.detail === detail) {
             previous.end_min = step.end_min; previous.distance_m += step.distance_m;
         } else result.push({ id: `step-${index}`, title, detail, kind, start_min: step.start_min, end_min: step.end_min, distance_m: step.distance_m, point: step.coordinates[0] });
     }
-    result.push({ id: 'arrival', title: route.return_walk ? 'Back at your start' : `Arrive · ${route.entrance.name}`, kind: 'arrival', start_min: route.total_min,
-        end_min: route.total_min, distance_m: 0, point: route.coordinates.at(-1)!, detail: 'Times are estimates. Conditions may change during the walk.' });
+    result.push({ id: 'arrival', title: route.return_walk ? say('Back at your start', 'Kembali ke titik mula') : `${say('Arrive', 'Tiba')} · ${route.entrance.name}`, kind: 'arrival', start_min: route.total_min,
+        end_min: route.total_min, distance_m: 0, point: route.coordinates.at(-1)!, detail: say('Times are estimates. Conditions may change during the walk.', 'Masa adalah anggaran. Keadaan boleh berubah semasa berjalan.') });
     return result;
 }
 

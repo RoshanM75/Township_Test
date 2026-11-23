@@ -13,6 +13,8 @@ import VerificationPreview from '@/components/walking/VerificationPreview';
 import { PILOTS,pilotFromParams,type PilotId } from '@/lib/pilots';
 import PilotSelector from '@/components/walking/PilotSelector';
 import PilotSources from '@/components/walking/PilotSources';
+import ReviewerAccess, { useReviewerKey } from '@/components/review/ReviewerAccess';
+import CommunityReview from '@/components/review/CommunityReview';
 
 const Map = dynamic(() => import('@/components/map/InteractiveMap'), { ssr: false });
 const control = 'mt-1 min-h-11 w-full rounded-lg border border-slate-400 bg-white px-3 py-2 text-slate-900';
@@ -20,6 +22,7 @@ const button = 'min-h-11 rounded-xl bg-[#A4262C] px-4 py-3 font-bold text-white 
 
 function VerificationWorkspace({area}:{area:PilotId}) {
     const router=useRouter();
+    const [reviewerKey, setReviewerKey] = useReviewerKey();
     const [data, setData] = useState<WalkingData | null>(null);
     const [graph, setGraph] = useState<GraphData | null>(null);
     const [version, setVersion] = useState(0);
@@ -47,7 +50,7 @@ function VerificationWorkspace({area}:{area:PilotId}) {
     const fields = observationFields(target);
     const targets = target === 'path' || target === 'crossing'
         ? (graph?.edges ?? []).filter(e => Boolean(e.is_crossing) === (target === 'crossing')).map(e => ({ id: String(e.id), name: `${e.name || 'Footpath'} · ${e.id}` }))
-        : (data?.assets ?? []).filter(a => target === 'entrance' ? a.kind === 'entrance' : ['rest', 'shelter', 'toilet', 'water', 'transit'].includes(a.kind)).map(a => ({ id: a.id, name: a.name }));
+        : (data?.assets ?? []).filter(a => target === 'entrance' ? a.kind === 'entrance' : ['destination', 'rest', 'shelter', 'toilet', 'water', 'transit'].includes(a.kind)).map(a => ({ id: a.id, name: a.name }));
     async function saveObservation(event: FormEvent) {
         event.preventDefault(); setBusy(true); setError(''); setMessage('');
         try {
@@ -60,7 +63,7 @@ function VerificationWorkspace({area}:{area:PilotId}) {
             if (!instant) throw new Error('Choose the observation time.');
             await recordVerification({area_id:area, target_type: target, target_id: targetId, status, method, reviewer, observed_at: instant,
                 valid_until: status === 'verified' ? new Date(`${reviewDate}T23:59:59+08:00`).toISOString() : null,
-                source_ref: source, notes, attributes });
+                source_ref: source, notes, attributes }, reviewerKey);
             setMessage('Observation saved. Refresh the walking planner to use the latest checks.'); setValues({}); setNotes(''); setVersion(v => v + 1);
         } catch (e) { setError(e instanceof Error ? e.message : 'Could not save the observation.'); }
         finally { setBusy(false); }
@@ -68,7 +71,7 @@ function VerificationWorkspace({area}:{area:PilotId}) {
     async function saveAsset(event: FormEvent) {
         event.preventDefault(); setBusy(true); setError(''); setMessage('');
         try {
-            const result = await createWalkingAsset({ ...asset,area_id:area, lat: Number(asset.lat), lng: Number(asset.lng), parent_id: asset.kind === 'entrance' ? asset.parent_id : null });
+            const result = await createWalkingAsset({ ...asset,area_id:area, lat: Number(asset.lat), lng: Number(asset.lng), parent_id: asset.kind === 'entrance' ? asset.parent_id : null }, reviewerKey);
             setMessage('Mapped point saved as unverified. Add an observation to confirm its actual condition.');
             if (asset.kind !== 'destination') { setTarget(asset.kind === 'entrance' ? 'entrance' : 'facility'); setTargetId(result.id); }
             setAsset({ ...asset, name: '' }); setVersion(v => v + 1);
@@ -83,6 +86,8 @@ function VerificationWorkspace({area}:{area:PilotId}) {
             </header>
             <PilotSelector area={area} onChange={next=>router.replace(`?area=${next}`)}/>
             <PilotSources area={area}/>
+            <ReviewerAccess reviewerKey={reviewerKey} onKey={setReviewerKey} />
+            <CommunityReview area={area} reviewerKey={reviewerKey} />
             {error && <p role="alert" className="rounded-xl border border-red-400 bg-red-50 p-4 text-red-900">{error}</p>}
             {message && <p role="status" className="rounded-xl border border-green-400 bg-green-50 p-4 text-green-900">{message}</p>}
             {!data && <p role="status">Loading walking records…</p>}
@@ -102,7 +107,7 @@ function VerificationWorkspace({area}:{area:PilotId}) {
                         <div className="grid grid-cols-2 gap-3"><label className="text-sm font-semibold">Latitude<input required type="number" step="any" min={-90} max={90} className={control} value={asset.lat} onChange={e => setAsset({ ...asset, lat: e.target.value })} /></label>
                             <label className="text-sm font-semibold">Longitude<input required type="number" step="any" min={-180} max={180} className={control} value={asset.lng} onChange={e => setAsset({ ...asset, lng: e.target.value })} /></label></div>
                         <label className="block text-sm font-semibold">Source reference<input maxLength={500} className={control} value={asset.source_ref} onChange={e => setAsset({ ...asset, source_ref: e.target.value })} /></label>
-                        <button disabled={busy} className={button}>Save unverified mapped point</button>
+                        <button disabled={busy || !reviewerKey} className={button}>Save unverified mapped point</button>
                     </form>
                 </section>
                 <section className="rounded-2xl border border-slate-300 bg-white p-5">
