@@ -12,6 +12,8 @@ const PROBLEMS: Record<HazardKind, { category: string; severity: 'blocker' | 'co
     light_out: { category: 'Safety Electrical', severity: 'comfort', label: 'Streetlight is not working' },
     no_shade: { category: 'Shade Infrastructure', severity: 'comfort', label: 'No shade here' },
     broken_surface: { category: 'Pavement Renewal', severity: 'comfort', label: 'Pavement is broken' },
+    lift_out: { category: 'Access Barrier', severity: 'blocker', label: 'Lift is out of service' },
+    details_outdated: { category: 'Place information', severity: 'comfort', label: 'Place details need updating' },
 };
 
 export async function readGraph(area: PilotId = 'elmina') {
@@ -34,14 +36,16 @@ export async function readGraph(area: PilotId = 'elmina') {
 
 export async function readHazards(area: PilotId = 'elmina') {
     const { rows } = await getPool().query(`SELECT id::float8 AS id, edge_id::float8 AS edge_id,
-        lat, lng, kind, status FROM hazard_reports WHERE status <> 'fixed' AND area_id=$1 ORDER BY id`,[area]);
+        lat, lng, kind, status, asset_id::text FROM hazard_reports WHERE status <> 'fixed' AND area_id=$1 ORDER BY id`,[area]);
     return rows;
 }
 
+const REPORT_FIELDS = `id::text, hazard_report_id::text, edge_id::float8 AS edge_id,
+    lat, lng, kind, description, category, severity, location_name, estimated_cost_rm,
+    reported_by_proxy, status, created_at, asset_id::text, checked_at, fixed_at, dismissed_at, responsible_team, review_note`;
+
 export async function readReports(includeFixed = false, area: PilotId = 'elmina') {
-    const { rows } = await getPool().query(`SELECT id::text, hazard_report_id::text, edge_id::float8 AS edge_id,
-        lat, lng, kind, description, category, severity, location_name, estimated_cost_rm,
-        reported_by_proxy, status, created_at FROM defect_reports
+    const { rows } = await getPool().query(`SELECT ${REPORT_FIELDS} FROM defect_reports
         WHERE ($1::boolean OR status <> 'fixed') AND area_id=$2 ORDER BY created_at DESC, id DESC`, [includeFixed,area]);
     return rows;
 }
@@ -50,30 +54,41 @@ export async function createReport(report: NewReport) {
     const client = await getPool().connect();
     try {
         await client.query('BEGIN');
+        const area = report.area_id ?? 'elmina';
+        const asset = report.asset_id ? (await client.query<{
+            id: string; name: string; kind: string; edge_id: string | null; lat: number; lng: number;
+        }>(`SELECT id::text, name, kind, edge_id::text, lat, lng FROM walking_assets
+            WHERE id=$1 AND area_id=$2 FOR SHARE`, [report.asset_id, area])).rows[0] : null;
+        if (report.asset_id && !asset) throw new RequestError('The selected asset was not found in this area.', 422);
+        if (report.kind === 'lift_out' && asset?.kind !== 'entrance') {
+            throw new RequestError('Choose the entrance served by the lift.', 422);
+        }
+        const lat = asset?.lat ?? report.lat;
+        const lng = asset?.lng ?? report.lng;
         // Check the claimed edge against the reported position on the server using PostGIS.
-        const { rows } = await client.query<{ id: string; name: string | null; length_m: number }>(`
-            SELECT id::text, name, length_m FROM path_edges
+        const { rows } = await client.query<{ id: string; name: string | null; length_m: number; is_crossing: boolean }>(`
+            SELECT id::text, name, length_m, is_crossing FROM path_edges
             WHERE pedestrian_access AND ($3::bigint IS NULL OR id = $3)
               AND area_id=$4 AND ST_DWithin(geom::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, 150)
             ORDER BY ST_Distance(geom::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography)
-            LIMIT 1 FOR SHARE`, [report.lng, report.lat, report.edge_id ?? null,report.area_id??'elmina']);
+            LIMIT 1 FOR SHARE`, [lng, lat, asset ? asset.edge_id : report.edge_id ?? null, area]);
         const edge = rows[0];
-        if (!edge) throw new RequestError('Choose a location within 150 metres of a mapped footpath.', 422);
+        if (!edge && !asset) throw new RequestError('Choose a location within 150 metres of a mapped footpath.', 422);
         const problem = PROBLEMS[report.kind];
-        const location = edge.name || `Walkway Edge #${edge.id}`;
+        const location = asset?.name || edge?.name || `${edge?.is_crossing ? 'Crossing' : 'Walkway'} #${edge?.id}`;
         const description = report.description || `${problem.label} reported on ${location}`;
-        const { rows: hazards } = await client.query(`INSERT INTO hazard_reports(edge_id, lat, lng, kind, area_id)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING id::float8 AS id, edge_id::float8 AS edge_id, lat, lng, kind, status`,
-        [edge.id, report.lat, report.lng, report.kind,report.area_id??'elmina']);
+        const { rows: hazards } = await client.query(`INSERT INTO hazard_reports(edge_id, lat, lng, kind, area_id, asset_id)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING id::float8 AS id, edge_id::float8 AS edge_id, lat, lng, kind, status, asset_id::text`,
+        [edge?.id ?? null, lat, lng, report.kind, area, asset?.id ?? null]);
         const { rows: defects } = await client.query(`INSERT INTO defect_reports
             (hazard_report_id, edge_id, lat, lng, kind, description, category, severity, location_name,
-             estimated_cost_rm, reported_by_proxy,area_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,$12)
-            RETURNING id::text, hazard_report_id::text, edge_id::float8 AS edge_id, lat, lng, kind,
-                description, category, severity, location_name, estimated_cost_rm, reported_by_proxy, status, created_at`,
-        [hazards[0].id, edge.id, report.lat, report.lng, report.kind, description,
-            problem.category, problem.severity, location, estimateDefectCost(report.kind, edge.length_m), report.reported_by_proxy,report.area_id??'elmina']);
+             estimated_cost_rm, reported_by_proxy, area_id, asset_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            RETURNING ${REPORT_FIELDS}`,
+        [hazards[0].id, edge?.id ?? null, lat, lng, report.kind, description, problem.category, problem.severity, location,
+            report.kind === 'details_outdated' || report.kind === 'lift_out' ? 0 : estimateDefectCost(report.kind, edge?.length_m),
+            report.reported_by_proxy, area, asset?.id ?? null]);
         await client.query('COMMIT');
         return { hazard: hazards[0], report: defects[0] };
     } catch (error) {
@@ -84,14 +99,27 @@ export async function createReport(report: NewReport) {
     }
 }
 
-export async function fixReport(id: string,area:PilotId='elmina') {
+export async function reviewReport(id: string, area: PilotId, check?: { team: string; note: string; dismiss: boolean }) {
     const client = await getPool().connect();
     try {
         await client.query('BEGIN');
-        const { rows } = await client.query(`UPDATE defect_reports SET status = 'fixed' WHERE id = $1 AND area_id=$2
-            RETURNING id::text, hazard_report_id::text, status`, [id,area]);
-        if (!rows[0]) throw new RequestError('The report was not found.', 404);
-        await client.query("UPDATE hazard_reports SET status = 'fixed' WHERE id = $1", [rows[0].hazard_report_id]);
+        const old = (await client.query(`SELECT ${REPORT_FIELDS} FROM defect_reports
+            WHERE id=$1 AND area_id=$2 FOR UPDATE`, [id, area])).rows[0];
+        if (!old) throw new RequestError('The report was not found.', 404);
+        if (old.status === 'fixed' || (check && old.checked_at)) {
+            await client.query('COMMIT');
+            return old;
+        }
+        if (!check && !old.checked_at) throw new RequestError('Check the report before marking it fixed.', 409);
+        const { rows } = check
+            ? await client.query(`UPDATE defect_reports SET checked_at=NOW(), responsible_team=$2, review_note=$3,
+                status=CASE WHEN $4 THEN 'fixed' ELSE status END,
+                dismissed_at=CASE WHEN $4 THEN NOW() ELSE NULL END
+                WHERE id=$1 RETURNING ${REPORT_FIELDS}`, [id, check.team, check.note, check.dismiss])
+            : await client.query(`UPDATE defect_reports SET status='fixed', fixed_at=NOW()
+                WHERE id=$1 RETURNING ${REPORT_FIELDS}`, [id]);
+        await client.query('UPDATE hazard_reports SET status=$2 WHERE id=$1',
+            [old.hazard_report_id, check && !check.dismiss ? 'verified' : 'fixed']);
         await client.query('COMMIT');
         return rows[0];
     } catch (error) {

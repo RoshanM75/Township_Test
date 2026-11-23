@@ -60,7 +60,7 @@ export interface WalkingData {
 }
 
 export function placeSearchText(asset:WalkingAsset){
-    return [asset.name,asset.category,...['osm_name','name_ms','name_en','station_ref'].map(key=>asset.properties[key])].filter(value=>typeof value==='string').join(' ').toLowerCase();
+    return [asset.name,asset.category,...['osm_name','name_ms','name_en','station_ref','official_name','official_address'].map(key=>asset.properties[key])].filter(value=>typeof value==='string').join(' ').toLowerCase();
 }
 
 export interface WalkingNeeds {
@@ -104,6 +104,7 @@ export interface JourneyStep {
 export interface JourneyRoute extends RouteResult {
     steps?: JourneyStep[];
     return_walk?: boolean;
+    community_id?: string;
     entrance: WalkingAsset;
     destination: WalkingAsset;
     rest_stops: WalkingAsset[];

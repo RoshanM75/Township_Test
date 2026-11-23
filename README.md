@@ -36,7 +36,7 @@ npm run dev
 - `/` — app entry page
 - `/resident` — pedestrian walking planner, with `?area=um-campus` for the campus pilot
 - `/dashboard` — shared maintenance queue
-- `/verification` — map destinations, entrances and facilities; record dated, field-specific checks
+- `/verification` — review community routes and record dated checks for mapped places, entrances and facilities
 - `/api/health` — database, PostGIS version and graph counts
 
 `db:up` starts PostgreSQL 17/PostGIS 3.5, bound to the local loopback interface. `db:setup` creates the schema and imports the Elmina, Pasar Seni and UM pedestrian snapshots. APIs for a pilot without an imported dataset return a source availability error. A first setup needs Internet access to download packages, source data and the database image. Subsequent route planning and reports use the local database.
@@ -50,7 +50,7 @@ For an existing local installation, run `npm run db:setup` after updating the co
 - **Personal requirements:** pace, slope limit, step-free access, marked/controlled crossings, surface condition, total trip budget and optional current-check-only routing. Preferences are saved on the device and included in shared walk links.
 - **Rest-aware paths:** a required rest interval changes the actual route. Only facilities with current checks for availability, path connection and seating (or wheelchair rest space) fulfil it. Optional backrest, armrest and shelter requirements are enforced. Walking to/from the seat, crossing waits and rest duration count toward the trip budget.
 - **Usable arrival points:** destinations have separate entrances. Automatic selection prefers a currently checked entrance within the budget; residents can also choose one explicitly. Known closures and incompatible step-free access are rejected, with opening hours evaluated at arrival.
-- **Reachable places:** “What can I reach?” uses the same network, requirements, entrances and budget for healthcare, food, shops, community places, parks, transit, toilets and water. Categories remain empty until real places are mapped.
+- **Reachable places:** “Find nearby places” uses the same network, requirements, entrances and budget for healthcare, food, shops, community places, parks, transit, toilets and water. Place cards show the arrival point, hours at the estimated arrival time, and nearby mapped seats or toilets. Public directory facts carry a source link.
 - **Departure-time comfort:** Malaysia departure time selects the shade/lighting model and matching hourly weather forecast. Forecast outages or missing hours stay unavailable; no temperatures are fabricated.
 
 The route summary includes a **red/yellow/green bar**, a text label and an icon. Green means the route meets the selected requirements and relevant current checks. Yellow means a route is available but some conditions need confirmation, including when it is the best available option. Red means no matching route was found; requirements are never silently relaxed. The bar expresses evidence and personal suitability, not a probability of safety.
@@ -59,13 +59,20 @@ See the [walking planner and verification guide](docs/walking-planner.md) for au
 
 The [team design direction](docs/team-design-direction.md) maps the environmental-routing and community ideas to the UI and future data work. The planner provides information layers with explicit unknown/expired states and a dimensional comfort breakdown; the source snapshot currently has no shade, cover or lighting observations. Satellite canopy analysis, live radar, shared voting and automatic contact alerts require additional data or backend work.
 
+### Community routes and maintenance
+
+- Residents can add map waypoints, record a walk, or use an earlier GPS recording. The editor previews the selected public segment and lets them trim both ends. Shared submissions enter the review queue for their area. Time-stamped GPS fixes stay on the device.
+- In `/verification`, a reviewer can publish a screened suggestion, then record an in-person check and public access hours. A current field check lets walkers plan the shared route with their own requirements, rest intervals, and current hazards. Proposals with gaps stay in the review queue for mapping.
+- Residents can report paths, crossings, lift outages, unavailable facilities and incorrect place details. In `/dashboard`, a reviewer records the responsible team and what they checked, then marks the repair fixed after confirming it. The resident report history shows each date. Checked outages can change the available routes, and affected active and saved walks show an update.
+- GitHub Pages includes the place data, route editor and device drafts. Sharing, review and live maintenance require the Next.js server and PostGIS.
+
 ### Database configuration
 
-The app and setup scripts default to the development database created by Compose. Copy `.env.example` to `.env.local` only if you need to override `DATABASE_URL`. It is a **server-only** connection string; never expose it with a `NEXT_PUBLIC_` prefix. Old Supabase environment variables are no longer used.
+The app and setup scripts default to the development database created by Compose. Copy `.env.example` to `.env.local` to set `TOWNSHIP_REVIEW_KEY` or override `DATABASE_URL`. Both values stay on the Next.js server. Enter the reviewer key in the maintenance or verification page to enable review actions in that tab.
 
 The default password in Compose is for local development. If you customize the database user/password/port, keep your Compose settings and `DATABASE_URL` consistent. Restart Next.js after changing the connection string. Docker Compose reads exported variables or `.env`; the Node scripts also read `.env.local`.
 
-No migrations or writes to an existing hosted database occur. `db/schema.sql` targets the new local database. This is a local prototype; public deployment and administrator authentication are separate work.
+The schema update adds the review records to the database selected by `DATABASE_URL`. The reviewer key provides shared pilot-team access. An operator deployment can replace it with individual accounts and area-level roles.
 
 ## Pedestrian data
 

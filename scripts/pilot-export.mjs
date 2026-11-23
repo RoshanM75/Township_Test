@@ -3,6 +3,7 @@ import { mkdir,writeFile,readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { pointInPilot } from '../lib/pilots.ts';
 import { gisLayers } from './pilot-snapshot.mjs';
+import { attachLocalDirectory } from './pilot-place-directory.mjs';
 
 /** Missing source data leaves KL pending. Corrupt or private data still stops the build. */
 export async function loadPagesPilot(path,area='pasar-seni'){
@@ -11,15 +12,22 @@ export async function loadPagesPilot(path,area='pasar-seni'){
     catch(error){if(error.code==='ENOENT')return null;throw error;}
     const bundle=JSON.parse(contents);
     validatePilotSnapshot(bundle,area);
-    let supplement;
-    try { supplement=JSON.parse(await readFile(resolve(dirname(path),'walking-details.json'),'utf8')); }
-    catch(error){if(error.code==='ENOENT')return bundle;throw error;}
-    if(supplement.area_id!==area)throw Error('Walking details belong to another area.');
-    if(supplement.dataset_id!==bundle.context.dataset_id){
-        console.warn(`${area}: imported walking details are for an older graph. Run npm run data:details to rebuild them.`);
-        return bundle;
+    const folder = dirname(path);
+    const readOptional = async file => {
+        try { return JSON.parse(await readFile(resolve(folder, file), 'utf8')); }
+        catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+    };
+    let enriched = bundle;
+    const supplement = await readOptional('walking-details.json');
+    if (supplement) {
+        if (supplement.area_id !== area) throw Error('Walking details belong to another area.');
+        if (supplement.dataset_id === bundle.context.dataset_id) enriched = attachPilotDetails(enriched, supplement);
+        else console.warn(`${area}: imported walking details are for an older graph. Run npm run data:details to rebuild them.`);
     }
-    return attachPilotDetails(bundle,supplement);
+    const directory = await readOptional('local-places.json');
+    if (directory) enriched = await attachLocalDirectory(enriched, directory, folder);
+    validatePilotSnapshot(enriched, area);
+    return enriched;
 }
 
 export function attachPilotDetails(bundle,supplement){

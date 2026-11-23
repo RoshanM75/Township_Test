@@ -9,7 +9,7 @@ export type ComfortRating = 'easier' | 'as_expected' | 'harder' | 'not_sure';
 export interface WalkFeedback { heat: ComfortRating; effort: ComfortRating; access: ComfortRating; notes: string; recorded_at: string }
 export interface ConditionUpdate { id: string; kind: 'blocked' | 'light_out' | 'seat_unavailable'; target_type: 'path' | 'crossing' | 'facility'; target_id: string;
     area_id?:PilotId;dataset_id?:string;
-    name: string; observed_at: string; valid_until: string; notes: string; shared_at?: string }
+    name: string; observed_at: string; valid_until: string; notes: string; shared_at?: string; report_id?: string }
 export type PackCheck = Pick<VerificationRecord, 'id' | 'created_at' | 'target_type' | 'target_id' | 'status' | 'observed_at' | 'valid_until' | 'attributes'>;
 export interface WalkPack { version: 1; id: string; saved_at: string; data_at: string; title: string; route: JourneyRoute; profile: Profile;
     area_id?:PilotId;dataset_id?:string;

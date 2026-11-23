@@ -12,7 +12,7 @@ export type DataSource = 'audited' | 'reported' | 'modelled' | 'assumed';
 export type Profile = 'senior' | 'cane_walker' | 'wheelchair';
 export type TimeSlot = 'morning' | 'midday' | 'afternoon' | 'night';
 export type Mode = 'direct' | 'coolest' | 'sheltered' | 'safest';
-export type HazardKind = 'blocked' | 'no_ramp' | 'light_out' | 'no_shade' | 'broken_surface';
+export type HazardKind = 'blocked' | 'no_ramp' | 'light_out' | 'no_shade' | 'broken_surface' | 'lift_out' | 'details_outdated';
 export type HazardStatus = 'open' | 'verified' | 'fixed';
 
 export interface PathNode {
@@ -61,6 +61,7 @@ export interface HazardReport {
     edge_id: number | null;
     kind: HazardKind;
     status: HazardStatus;
+    asset_id?: string | null;
 }
 
 export interface Graph {
@@ -269,7 +270,7 @@ export function nearestEdge(graph: Graph, lat: number, lng: number): { edge_id: 
 export function indexHazards(reports: HazardReport[]): Map<number, HazardReport[]> {
     const m = new Map<number, HazardReport[]>();
     for (const r of reports) {
-        if (r.status === 'fixed' || r.edge_id == null) continue;
+        if (r.status === 'fixed' || r.edge_id == null || r.asset_id) continue;
         const edgeId = Number(r.edge_id);
         const list = m.get(edgeId);
         if (list) list.push(r);

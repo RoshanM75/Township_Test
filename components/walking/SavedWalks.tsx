@@ -8,9 +8,11 @@ import { routeSketch } from '@/lib/walk-timeline';
 import { sitePath, IS_PAGES_PREVIEW } from '@/lib/site';
 import PaceCalibration from './PaceCalibration';
 import WalkFeedback from './WalkFeedback';
-import { PILOTS } from '@/lib/pilots';
+import { PILOTS, type PilotId } from '@/lib/pilots';
+import type { MaintenanceDefect } from '@/lib/types';
+import { checkedRouteReports } from '@/lib/report-status';
 
-export default function SavedWalks({ library, profile, pace, onChange, onReplan, onFeedback, onUsePace, onShare }: { library: WalkLibrary; profile: Profile; pace: number | null;
+export default function SavedWalks({ library, profile, pace, area, reports, onChange, onReplan, onFeedback, onUsePace, onShare }: { library: WalkLibrary; profile: Profile; pace: number | null; area: PilotId; reports: MaintenanceDefect[];
     onChange: (library: WalkLibrary) => boolean; onReplan: (pack: WalkPack) => void; onFeedback: (id: string, value: Feedback) => boolean; onUsePace: (speed: number) => void; onShare: (value: ConditionUpdate) => Promise<boolean> }) {
     const [selected, setSelected] = useState<string | null>(null), [message, setMessage] = useState('');
     const [now, setNow] = useState(Date.now);
@@ -19,10 +21,14 @@ export default function SavedWalks({ library, profile, pace, onChange, onReplan,
     function remove(kind: 'packs' | 'history' | 'updates', id: string) {
         if (window.confirm('Remove this item from this device? Any report already shared remains in the server record.')) onChange({ ...library, [kind]: library[kind].filter(item => item.id !== id) });
     }
-    if (pack) { const sketch=routeSketch(pack.route.coordinates);return <div className="tg-stack">
+    if (pack) {
+        const changes = (pack.area_id ?? 'elmina') === area ? checkedRouteReports(pack.route, reports) : [];
+        const sketch=routeSketch(pack.route.coordinates);return <div className="tg-stack">
         <button className="tg-btn" onClick={() => setSelected(null)}>Back to Saved</button><h1 className="tg-h2">{pack.title}</h1>
         <p className="tg-note tg-warnbox">{PILOTS[pack.area_id??'elmina'].short_name} · saved snapshot · {new Date(pack.saved_at).toLocaleDateString('en-MY')}. Recheck conditions before setting out. A saved route rating does not establish current conditions.</p>
         <p className="tg-small">Network snapshot: {pack.network_snapshot_at ? new Date(pack.network_snapshot_at).toLocaleDateString('en-MY') : 'date not provided'}. Condition records loaded: {new Date(pack.data_at).toLocaleDateString('en-MY')}; individual observations retain their own dates.</p>
+        {changes.length > 0 && <p className="tg-note tg-warnbox" role="status">{changes.length} checked report{changes.length === 1 ? '' : 's'} on this walk.
+            Review current conditions before leaving.</p>}
         <svg viewBox="0 0 600 340" role="img" aria-label="Saved route sketch, north is up" className="w-full rounded-xl bg-[#e9eee6]"><polyline points={sketch.points} fill="none" stroke="#a4262c" strokeWidth={5} /><circle cx={sketch.start[0]} cy={sketch.start[1]} r={7} fill="#166534" /></svg>
         <p className="tg-small">{Math.ceil(pack.route.total_min)} min estimated · {Math.round(pack.route.length_m)} m · {pack.route.rest_min} min planned rest. Route sketch: © OpenStreetMap contributors, ODbL.</p>
         <button className="tg-btn tg-btn-primary" onClick={() => onReplan(pack)}>Check this walk with current data</button>

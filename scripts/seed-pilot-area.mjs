@@ -33,6 +33,10 @@ export async function seedPilotArea(pool,bundle){
             [a.id,area,a.external_id,a.parent_id,a.source_ref,a.edge_id]);
             if (!match.rowCount) throw Error('A mapped access point conflicts with an existing verification target.');
         }
+        for (const [id, properties] of Object.entries(bundle.directory_properties ?? {})) {
+            await client.query(`UPDATE walking_assets SET properties = properties || $3::jsonb WHERE id=$1 AND area_id=$2`,
+                [id, area, JSON.stringify(properties)]);
+        }
         for(const [key,value]of [[`pilot:${area}:revision`,bundle.context.dataset_id],[`pilot:${area}:context`,JSON.stringify(bundle.context)]])await client.query('INSERT INTO app_metadata(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value',[key,value]);
         await client.query('COMMIT');console.log(`${PILOTS[area].short_name} source data ready; ${bundle.graph.edges.length} paths.`);
     }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}

@@ -33,7 +33,7 @@ const LABEL: Record<PanelState, (walk: boolean) => string> = {
     full: () => 'Collapse panel',
 };
 
-export default function PanelGrip({ state, walk, onChange }: { state: PanelState; walk: boolean; onChange: (state: PanelState) => void }) {
+export default function PanelGrip({ state, walk, warning, onChange }: { state: PanelState; walk: boolean; warning?: boolean; onChange: (state: PanelState) => void }) {
     const drag = useRef<{ y: number; height: number; sheet: HTMLElement; lastY: number; lastT: number; velocity: number; moved: boolean } | null>(null);
     const suppressClick = useRef(false);
     const Icon = state === 'min' ? ChevronUp : state === 'partial' ? ChevronsUp : ChevronDown;
@@ -97,7 +97,7 @@ export default function PanelGrip({ state, walk, onChange }: { state: PanelState
             }}
         >
             <span className="tg-panel-grip-bar" aria-hidden />
-            <span><Icon size={15} aria-hidden />{LABEL[state](walk)}</span>
+            <span><Icon size={15} aria-hidden />{state === 'min' && warning ? 'Conditions changed · Show walk controls' : LABEL[state](walk)}</span>
         </button>
     );
 }

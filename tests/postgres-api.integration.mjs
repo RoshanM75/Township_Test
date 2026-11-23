@@ -3,6 +3,7 @@ import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { randomUUID } from 'node:crypto';
 import net from 'node:net';
 import pg from 'pg';
 import dotenv from 'dotenv';
@@ -27,6 +28,7 @@ test('Next.js APIs with real PostgreSQL/PostGIS', { timeout: 60000 }, async (t) 
     const databaseName = `township_test_${process.pid}_${Date.now()}`;
     const connection = new URL(process.env.DATABASE_URL || LOCAL_DATABASE_URL);
     connection.pathname = `/${databaseName}`;
+    const reviewKey = randomUUID();
     let fixture;
     let app;
     let dropped = false;
@@ -45,7 +47,7 @@ test('Next.js APIs with real PostgreSQL/PostGIS', { timeout: 60000 }, async (t) 
                    (12, 2, 3, 102, 'Test crossing', 'footway', TRUE, '[[101.6600,3.1200],[101.6613,3.1143]]', 650, 'crossing')`);
         const port = await availablePort();
         app = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'start', '--hostname', '127.0.0.1', '--port', String(port)], {
-            env: { ...process.env, DATABASE_URL: connection.href }, stdio: ['ignore', 'pipe', 'pipe'],
+            env: { ...process.env, DATABASE_URL: connection.href, TOWNSHIP_REVIEW_KEY: reviewKey }, stdio: ['ignore', 'pipe', 'pipe'],
         });
         await new Promise((resolve, reject) => {
             const timer = setTimeout(() => reject(new Error(`App did not start: ${logs}`)), 15000);
@@ -59,6 +61,13 @@ test('Next.js APIs with real PostgreSQL/PostGIS', { timeout: 60000 }, async (t) 
             return { status: response.status, body: await response.json() };
         };
         const post = (body) => request('/api/reports', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const review = (path, body, method = 'POST') => request(path, {
+            method, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${reviewKey}` },
+            ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        });
+        const check = (id, area = 'elmina', dismiss = false) => review(`/api/reports/${id}/check?area=${area}`,
+            { team: 'Pilot review team', note: 'Inspected in the integration scenario', dismiss });
+        const fix = (id, area = 'elmina') => review(`/api/reports/${id}/fix?area=${area}`);
         const position = { lat: 3.1223, lng: 101.6580, edge_id: 11 };
         const counts = async () => (await fixture.query(`SELECT (SELECT count(*)::int FROM hazard_reports) AS hazards,
             (SELECT count(*)::int FROM defect_reports) AS reports`)).rows[0];
@@ -99,7 +108,7 @@ test('Next.js APIs with real PostgreSQL/PostGIS', { timeout: 60000 }, async (t) 
                 assert.equal((await post(input)).status, 400);
             }
             assert.equal((await request('/api/reports?status=unknown')).status, 400);
-            assert.equal((await request('/api/reports/1%20OR%201=1/fix', { method: 'POST' })).status, 400);
+            assert.equal((await review('/api/reports/1%20OR%201=1/fix')).status, 400);
             assert.equal((await request('/api/reports', { method: 'POST', body: '{' })).status, 400);
             assert.equal((await post({ ...position, kind: 'blocked', description: 'x'.repeat(17000) })).status, 413);
             assert.deepEqual(await counts(), { hazards: 1, reports: 1 });
@@ -109,7 +118,8 @@ test('Next.js APIs with real PostgreSQL/PostGIS', { timeout: 60000 }, async (t) 
             assert.equal((await post({ ...position, edge_id: 99999, kind: 'blocked' })).status, 422);
             const snapped = await post({ lat: position.lat, lng: position.lng, kind: 'light_out' });
             assert.equal(snapped.status, 201); assert.equal(snapped.body.report.edge_id, 11);
-            await request(`/api/reports/${snapped.body.report.id}/fix`, { method: 'POST' });
+            await check(snapped.body.report.id);
+            await fix(snapped.body.report.id);
         });
         await t.test('a failed defect insert rolls back the hazard insert', async () => {
             const before = await counts();
@@ -122,10 +132,19 @@ test('Next.js APIs with real PostgreSQL/PostGIS', { timeout: 60000 }, async (t) 
             } finally { await fixture.query('ALTER TABLE defect_reports DROP CONSTRAINT reject_test_note'); }
         });
         await t.test('marking a report fixed updates its hazard and supports retries', async () => {
-            assert.equal((await request('/api/reports/999999/fix', { method: 'POST' })).status, 404);
-            const result = await request(`/api/reports/${reportId}/fix`, { method: 'POST' });
+            assert.equal((await fix('999999')).status, 404);
+            assert.equal((await request(`/api/reports/${reportId}/fix`, { method: 'POST' })).status, 401);
+            assert.equal((await fix(reportId)).status, 409);
+            const checked = await check(reportId);
+            assert.equal(checked.status, 200);
+            assert.ok(checked.body.report.checked_at);
+            assert.equal(checked.body.report.responsible_team, 'Pilot review team');
+            assert.equal((await check(reportId)).body.report.checked_at, checked.body.report.checked_at);
+            assert.equal((await request('/api/hazards')).body.hazards[0].status, 'verified');
+            const result = await fix(reportId);
             assert.equal(result.status, 200); assert.equal(result.body.report.status, 'fixed');
-            assert.equal((await request(`/api/reports/${reportId}/fix`, { method: 'POST' })).status, 200);
+            assert.ok(result.body.report.fixed_at);
+            assert.equal((await fix(reportId)).body.report.fixed_at, result.body.report.fixed_at);
             assert.deepEqual((await request('/api/reports')).body.reports, []);
             assert.deepEqual((await request('/api/hazards')).body.hazards, []);
             const hazard = await fixture.query('SELECT status FROM hazard_reports WHERE id = $1', [hazardId]);
@@ -135,9 +154,11 @@ test('Next.js APIs with real PostgreSQL/PostGIS', { timeout: 60000 }, async (t) 
         await t.test('fixing one report preserves another open report on the same edge', async () => {
             const a = await post({ ...position, kind: 'broken_surface' });
             const b = await post({ ...position, kind: 'broken_surface' });
-            await request(`/api/reports/${a.body.report.id}/fix`, { method: 'POST' });
+            await check(a.body.report.id);
+            await fix(a.body.report.id);
             assert.equal((await request('/api/hazards')).body.hazards[0].id, b.body.hazard.id);
-            await request(`/api/reports/${b.body.report.id}/fix`, { method: 'POST' });
+            await check(b.body.report.id);
+            await fix(b.body.report.id);
         });
         await t.test('concurrent submissions retain one hazard per report', async () => {
             const results = await Promise.all(Array.from({ length: 4 }, () => post({ ...position, kind: 'no_shade' })));
@@ -147,7 +168,8 @@ test('Next.js APIs with real PostgreSQL/PostGIS', { timeout: 60000 }, async (t) 
             assert.equal((await request('/api/reports')).body.reports.length, 4);
         });
         await t.test('places, usable entrance anchors and facilities are stored without claiming verification', async () => {
-            const assetPost = body => request('/api/assets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            const assetPost = body => review('/api/assets', body);
+            assert.equal((await request('/api/assets', { method: 'POST', body: '{}' })).status, 401);
             const destination = await assetPost({ kind: 'destination', category: 'healthcare', name: 'Test clinic', lat: 3.12115, lng: 101.659 });
             assert.equal(destination.status, 201);
             const entrance = await assetPost({ kind: 'entrance', parent_id: destination.body.id, category: 'healthcare', name: 'Test step-free door', lat: 3.12115, lng: 101.659 });
@@ -165,7 +187,7 @@ test('Next.js APIs with real PostgreSQL/PostGIS', { timeout: 60000 }, async (t) 
             assert.equal((await assetPost({ kind: 'bike_rental', name: 'Wrong scope', lat: 3.12, lng: 101.658 })).status, 400);
         });
         await t.test('field-specific observations persist history, expiry dates and reviewer evidence', async () => {
-            const save = body => request('/api/verifications', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            const save = body => review('/api/verifications', body);
             const observed = new Date(Date.now() - 60000).toISOString(), until = new Date(Date.now() + 86400000).toISOString();
             const observation = { target_type: 'path', target_id: '11', status: 'verified', method: 'site_visit', reviewer: 'Integration audit team',
                 observed_at: observed, valid_until: until, source_ref: 'Test field sheet', attributes: { path_open: true, has_steps: false, slope_pct: 2, surface_rating: 1 } };
@@ -227,8 +249,9 @@ test('Next.js APIs with real PostgreSQL/PostGIS', { timeout: 60000 }, async (t) 
             assert.equal((await request('/api/reports?area=pasar-seni')).body.reports.length,1);
             assert.ok(!(await request('/api/reports?area=elmina')).body.reports.some(r=>r.id===report.body.report.id));
             assert.equal((await post({...point,area_id:'elmina'})).status,422);
-            assert.equal((await request(`/api/reports/${report.body.report.id}/fix?area=elmina`,{method:'POST'})).status,404);
-            assert.equal((await request(`/api/reports/${report.body.report.id}/fix?area=pasar-seni`,{method:'POST'})).status,200);
+            assert.equal((await fix(report.body.report.id, 'elmina')).status, 404);
+            assert.equal((await check(report.body.report.id, 'pasar-seni')).status, 200);
+            assert.equal((await fix(report.body.report.id, 'pasar-seni')).status, 200);
             const save=body=>request('/api/condition-updates',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
             const update={kind:'blocked',target_type:'path',target_id:String(main.edges[0].id),observed_at:new Date().toISOString(),area_id:'elmina'};
             assert.equal((await save(update)).status,404);
@@ -243,13 +266,58 @@ test('Next.js APIs with real PostgreSQL/PostGIS', { timeout: 60000 }, async (t) 
             const after=(await request('/api/walking-data?area=pasar-seni')).body;
             assert.equal(after.assets.filter(asset=>asset.id===extra.id).length,1);
             assert.deepEqual(after.verifications,previousChecks);
-            const assets=body=>request('/api/assets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+            const assets = body => review('/api/assets', body);
             assert.equal((await assets({kind:'entrance',name:'Wrong area parent',parent_id:walking.assets.find(a=>a.kind==='destination').id,lat:3.1425,lng:101.6945,area_id:'elmina'})).status,404);
             const changed=structuredClone(bundle);changed.context.dataset_id='changed';changed.graph.source.dataset_id='changed';changed.walking.dataset_id='changed';
             await assert.rejects(()=>seedPilotArea(fixture,changed),/Another central KL dataset/);
             const unchanged=(await request('/api/walking-data?area=elmina')).body;
             assert.deepEqual(unchanged.verifications,before.verifications);
             assert.equal((await request('/api/graph?area=pasar-seni')).body.source.dataset_id,bundle.context.dataset_id);
+        });
+        await t.test('an asset report uses its own location and can be dismissed without recording a repair', async () => {
+            const place = (await request('/api/walking-data?area=pasar-seni')).body.assets.find(asset => asset.kind === 'entrance');
+            const posted = await post({ ...position, area_id: 'pasar-seni', asset_id: place.id, kind: 'blocked' });
+            assert.equal(posted.status, 201);
+            assert.equal(posted.body.report.lat, place.lat);
+            assert.equal(posted.body.hazard.asset_id, place.id);
+            assert.equal((await post({ ...position, asset_id: place.id, kind: 'blocked' })).status, 422);
+            const dismissed = await check(posted.body.report.id, 'pasar-seni', true);
+            assert.ok(dismissed.body.report.dismissed_at);
+            assert.equal(dismissed.body.report.fixed_at, null);
+            assert.deepEqual((await request('/api/hazards?area=pasar-seni')).body.hazards, []);
+        });
+        await t.test('community proposals stay private until screened and need a review before navigation', async () => {
+            const base = '/api/community-routes?area=pasar-seni';
+            const context = (await request('/api/pilot-context?area=pasar-seni')).body;
+            const draft = { submission_id: randomUUID(), dataset_id: context.dataset_id, title: 'Test local shortcut',
+                notes: 'Use the public path by the clinic.', public_ends: true, points: [[3.1425, 101.694], [3.1425, 101.696]] };
+            const upload = body => request(base, { method: 'POST', body: JSON.stringify(body) });
+            assert.equal((await upload({ ...draft, public_ends: false })).status, 400);
+            assert.equal((await upload({ ...draft, dataset_id: 'different' })).status, 409);
+            const submitted = await upload(draft);
+            assert.equal(submitted.status, 201);
+            const { route } = submitted.body;
+            assert.equal(route.status, 'submitted');
+            assert.ok(route.path.edge_ids.length > 0);
+            assert.equal((await upload(draft)).body.route.id, route.id);
+            assert.deepEqual((await request(base)).body.routes, []);
+            assert.equal((await request(`${base}&receipt=${draft.submission_id}`)).body.routes[0].id, route.id);
+            assert.equal((await request(`${base}&review=1`)).status, 401);
+
+            const endpoint = id => `/api/community-routes/${id}/review?area=pasar-seni`;
+            const evidence = { reviewer: 'Test route team', note: 'Tested the entire public path.' };
+            const verify = { ...evidence, action: 'verify', field_checked: true, opening_hours: '24/7' };
+            assert.equal((await request(endpoint(route.id), { method: 'POST' })).status, 401);
+            assert.equal((await review(endpoint(route.id), verify)).status, 409);
+            assert.equal((await review(endpoint(route.id), { ...evidence, action: 'publish' })).body.route.status, 'published');
+            assert.equal((await request(base)).body.routes[0].status, 'published');
+            assert.equal((await review(endpoint(route.id), { ...verify, field_checked: false })).status, 400);
+            const checked = await review(endpoint(route.id), verify);
+            assert.equal(checked.body.route.status, 'verified');
+            assert.ok(Date.parse(checked.body.route.valid_until) > Date.now());
+            const unmapped = await upload({ ...draft, submission_id: randomUUID(), points: [[3.1425, 101.694], [3.143, 101.694]] });
+            assert.equal(unmapped.body.route.path, null);
+            assert.equal((await review(endpoint(unmapped.body.route.id), { ...evidence, action: 'publish' })).status, 422);
         });
         await t.test('database outages return 503 without exposing connection details', async () => {
             await fixture.end(); fixture = undefined;

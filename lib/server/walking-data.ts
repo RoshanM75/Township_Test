@@ -109,7 +109,7 @@ export async function addVerification(body: unknown) {
         await client.query('BEGIN');
         const entity = target === 'path' || target === 'crossing'
             ? await client.query('SELECT id,area_id FROM path_edges WHERE id=$1 AND is_crossing=$2 FOR SHARE', [id, target === 'crossing'])
-            : await client.query(`SELECT id,area_id,connection_distance_m FROM walking_assets WHERE id=$1 AND ${target === 'entrance' ? "kind='entrance'" : "kind IN ('rest','shelter','toilet','water','transit')"} FOR SHARE`, [id]);
+            : await client.query(`SELECT id,area_id,connection_distance_m FROM walking_assets WHERE id=$1 AND ${target === 'entrance' ? "kind='entrance'" : "kind IN ('destination','rest','shelter','toilet','water','transit')"} FOR SHARE`, [id]);
         if (!entity.rowCount) throw new RequestError('The verification target was not found.', 404);
         const area=entity.rows[0].area_id;
         if(claimedArea&&area!==claimedArea)throw new RequestError('The target belongs to another walking area.',404);

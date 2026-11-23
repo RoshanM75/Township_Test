@@ -8,7 +8,13 @@ export default function WalkingRequirements({ needs, profile, onChange }: { need
     const set = <K extends keyof WalkingNeeds>(key: K, value: WalkingNeeds[K]) => onChange({ ...needs, [key]: value });
     return (
         <details className="rounded-xl border-2 border-slate-300 bg-white p-3 text-slate-900">
-            <summary className="cursor-pointer text-base font-bold">My walking needs</summary>
+            <summary className="min-h-8 cursor-pointer text-base font-bold">Walking needs
+                <span className="ml-2 text-sm font-normal">{[
+                    needs.step_free || profile === 'wheelchair' ? 'Step-free' : '',
+                    needs.require_rests ? `Rest every ${needs.rest_interval_min} min` : '',
+                    needs.verified_only ? 'Current checks' : '',
+                ].filter(Boolean).join(' · ') || `${needs.budget_min} min budget`}</span>
+            </summary>
             <div className="mt-3 space-y-3 text-sm">
                 {([
                     ['step_free', 'Step-free paths and access points'],

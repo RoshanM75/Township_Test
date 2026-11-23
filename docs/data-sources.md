@@ -4,6 +4,14 @@ For the **Pasar Seni–Chinatown–Masjid Jamek primary pilot**, see [source acq
 
 See the [UM campus source notes](../data/um-campus/README.md) for the separate campus and approaches import.
 
+## Local place directories
+
+Setup and the Pages build join published visitor facts to the original OpenStreetMap feature references. The two pilot directories contain 12 matched entries. The Pasar Seni directory also adds Perdana Botanical Gardens and six entrances connected to the archived walking graph. Operator hours and public contact information are separate from field observations. Route planning evaluates known weekly hours in Malaysia time. A venue’s published holiday exceptions remain visible on its card. [Pasar Seni directory](../data/pasar-seni/local-places.json) · [UM directory](../data/um-campus/local-places.json)
+
+- Central Market’s operator publishes daily opening hours. Tourism Malaysia identifies Kasturi Walk. DBKL publishes public toilet locations and hours for Perdana Botanical Gardens. The health ministry identifies Klinik Kesihatan Tanglin. Tanglin stays discoverable while a mapped pedestrian connection is missing. [Central Market](https://centralmarket.com.my/) · [Tourism Malaysia](https://www.malaysia.travel/storage/files/pdf/2026-Malaysia-Surreal-Experience.pdf) · [DBKL toilets](https://www.dbkl.gov.my/fasiliti-awam/tandas-awam) · [DBKL parks](https://www.dbkl.gov.my/fasiliti-awam/taman-awam/taman-botani-perdana) · [KKM clinics](https://www.moh.gov.my/fasiliti-kesihatan/klinik-kesihatan/wp-kuala-lumpur)
+- Universiti Malaya publishes library hours, student clinic information, facilities at Perdanasiswa and information on Tasek Varsiti. [UM library](https://umlib.um.edu.my/opening-hours-amp-locations) · [UM student clinic](https://hep.um.edu.my/KLINIK%20KESIHATAN%20UM/SKIM%20PERUBATAN%20KESIHATAN%20%28GL%29.pdf) · [Perdanasiswa](https://www.um.edu.my/perdanasiswa-complex) · [Tasek Varsiti](https://www.um.edu.my/tasek-varsiti)
+- The DBKL market workbook and Overture Places were unavailable to download in the import environment. A functioning citywide asset inventory and live maintenance feed would also need operator data. [DBKL open data catalogue](https://www.dbkl.gov.my/data-statistik/data-terbuka) · [Overture Places](https://docs.overturemaps.org/guides/places/)
+
 ## Included Elmina source
 
 `precinct.json` is an OpenStreetMap/Overpass JSON snapshot included in the repository. Its `timestamp_osm_base` is `2026-10-18T18:50:06Z`. Normal setup processes this local file; it does not contact an external routing API or download a new dataset.
