@@ -33,6 +33,11 @@
     cursor: pointer;
 }
 .tg-map-view { background: #fff8fa; }
+.tg-map-neighbourhood { max-width: 100%; }
+.tg-map-information select, .tg-map-neighbourhood select { min-width: 0; text-overflow: ellipsis; }
+@media (max-width: 500px) {
+    .tg-map-information select { max-width: 7.5rem; }
+}
 .tg-map-status { padding: .4rem .55rem; font-size: .74rem; width: fit-content; }
 .tg-map-fit {
     position: absolute;

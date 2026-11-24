@@ -2,9 +2,9 @@
 
 import dynamic from 'next/dynamic';
 import { useCallback, useMemo, useState } from 'react';
-import { Box, ChevronDown, Layers, Map as MapIcon } from 'lucide-react';
+import { Box, ChevronDown, Layers, Map as MapIcon, MapPin } from 'lucide-react';
 import { sitePath } from '@/lib/site';
-import type { PilotId } from '@/lib/pilots';
+import type { PilotId, PilotNeighbourhood } from '@/lib/pilots';
 import { environmentCoverage, environmentSegments, type EnvironmentLayer } from '@/lib/environment';
 import type { InteractiveMapProps } from './InteractiveMap';
 import './resident-map.css';
@@ -15,8 +15,10 @@ const Map3D = dynamic(() => import('./ResidentMap3D'), { ssr: false });
 export type MapMode = '2d' | '3d';
 
 export default function ResidentMap({
-    area, mapMode, onMapModeChange, informationLayer = 'routes', onInformationLayerChange, ...mapProps
-}: InteractiveMapProps & { area: PilotId; mapMode?: MapMode; onMapModeChange?: (mode: MapMode) => void }) {
+    area, mapMode, onMapModeChange, informationLayer = 'routes', onInformationLayerChange,
+    neighbourhoods, onNeighbourhoodChange, ...mapProps
+}: InteractiveMapProps & { area: PilotId; mapMode?: MapMode; onMapModeChange?: (mode: MapMode) => void;
+    neighbourhoods?: PilotNeighbourhood[]; onNeighbourhoodChange?: (point?: [number, number]) => void }) {
     const [localMode, setLocalMode] = useState<MapMode>('3d');
     const [failed, setFailed] = useState(false);
     const fallback = useCallback(() => setFailed(true), []);
@@ -27,6 +29,7 @@ export default function ResidentMap({
         ? environmentSegments(edges, records, at, informationLayer) : [],
     [informationLayer, edges, records, at]);
     const coverage = environmentCoverage(segments);
+    const neighbourhood = neighbourhoods?.find(item => item.coordinates === mapProps.focusLocation);
 
     function changeMode(next: MapMode) {
         setFailed(false);
@@ -51,7 +54,7 @@ export default function ResidentMap({
                     <ChevronDown size={14} aria-hidden />
                 </label>
                 {mapProps.environment && (
-                    <label className="tg-map-choice">
+                    <label className="tg-map-choice tg-map-information">
                         <Layers size={17} aria-hidden />
                         <span className="sr-only">Map information</span>
                         <select value={informationLayer} onChange={event => onInformationLayerChange?.(event.target.value as EnvironmentLayer | 'routes')}>
@@ -65,6 +68,23 @@ export default function ResidentMap({
                         <ChevronDown size={14} aria-hidden />
                     </label>
                 )}
+                {!!neighbourhoods?.length && (
+                    <label className="tg-map-choice tg-map-neighbourhood">
+                        <MapPin size={17} aria-hidden />
+                        <span className="sr-only">Map neighbourhood</span>
+                        <select value={neighbourhood?.id ?? ''} onChange={event => {
+                            onNeighbourhoodChange?.(neighbourhoods.find(item => item.id === event.target.value)?.coordinates);
+                        }}>
+                            <option value="">Map neighbourhoods</option>
+                            {neighbourhoods.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+                        </select>
+                        <ChevronDown size={14} aria-hidden />
+                    </label>
+                )}
+                {neighbourhood && !neighbourhood.connected_to_core && <p role="status" className="tg-map-status">
+                    {neighbourhood.start ? 'Local walks available. The connection to Pasar Seni needs mapping.'
+                        : 'Places and streets are mapped here. Walking connections need more detail.'}
+                </p>}
                 {failed && <p role="status" className="tg-map-status">3D is unavailable on this device.</p>}
                 {informationLayer !== 'routes' && <p role="status" className="tg-map-status">
                     {informationLayer === 'paths' ? `${coverage.total} mapped paths`

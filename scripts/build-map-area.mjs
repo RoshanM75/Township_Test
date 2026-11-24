@@ -33,7 +33,7 @@ function mapFeature(element, line) {
     if (line.length < 2) return null;
     const tags = element.tags ?? {};
     const name = nameOf(tags);
-    const closed = line.length >= 4 && element.nodes?.[0] === element.nodes?.at(-1);
+    const closed = line.length >= 4 && line[0][0] === line.at(-1)[0] && line[0][1] === line.at(-1)[1];
     const feature = (kind, type, properties = {}) => ({
         type: 'Feature', properties: { kind, ...(name ? { name } : {}), ...properties },
         geometry: { type, coordinates: type === 'Polygon' ? [line] : line },
@@ -66,7 +66,7 @@ function placeLabel(element, line, feature) {
 
     let kind;
     if (['station', 'halt'].includes(tags.railway) || tags.public_transport === 'station') kind = 'station';
-    else if (civicPlaces.has(tags.amenity) || attractions.has(tags.tourism)
+    else if (civicPlaces.has(tags.amenity) || attractions.has(tags.tourism) || ['suburb', 'quarter', 'neighbourhood'].includes(tags.place)
         || tags.historic || (tags.bridge && tags.bridge !== 'no' && tags.highway)) kind = 'landmark';
     else if (feature?.properties.kind === 'green' || feature?.properties.kind === 'water') kind = feature.properties.kind;
     else if (feature?.properties.kind === 'building' && tags.building !== 'roof') kind = 'building';
@@ -86,19 +86,32 @@ function placeLabel(element, line, feature) {
 }
 
 await mkdir(output, { recursive: true });
+async function readMapSource(source) {
+    try {
+        const file = await readFile(new URL(`../${source}`, import.meta.url));
+        return JSON.parse(source.endsWith('.gz') ? gunzipSync(file) : file);
+    } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+        return null;
+    }
+}
+
 for (const [area, sources] of Object.entries(extracts)) {
     const elements = new Map();
     for (const source of sources) {
-        try {
-            const file = await readFile(new URL(`../${source}`, import.meta.url));
-            const bytes = source.endsWith('.gz') ? gunzipSync(file) : file;
-            for (const element of JSON.parse(bytes).elements) elements.set(`${element.type}:${element.id}`, element);
-        } catch (error) {
-            if (error.code !== 'ENOENT') throw error;
-        }
+        const map = await readMapSource(source);
+        for (const element of map?.elements ?? []) elements.set(`${element.type}:${element.id}`, element);
     }
-
     const features = [];
+    if (area === 'pasar-seni') {
+        const extension = await readMapSource('data/pasar-seni/source/expanded-map-osm.json.gz');
+        const streets = await readMapSource('data/pasar-seni/source/expanded-map-streets.geojson.gz');
+        for (const element of extension?.elements ?? []) {
+            const key = `${element.type}:${element.id}`;
+            if (!elements.has(key)) elements.set(key, element);
+        }
+        features.push(...streets?.features ?? []);
+    }
     const names = new Set();
     for (const element of elements.values()) {
         const line = element.type === 'way' ? geometryOf(element) : [];

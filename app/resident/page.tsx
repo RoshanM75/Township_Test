@@ -477,9 +477,11 @@ function ResidentPageContent() {
         .sort((a,b)=>{const rank=(id:string)=>{const index=pilotData?.featured_ids.indexOf(id)??-1;return index<0?100:index;};return rank(a.id)-rank(b.id)||a.name.localeCompare(b.name);}),[places,searchTerm,pilotData]);
     const searchResults = matchingPlaces.slice(0, 8);
     const suggestedPlaces = (pilotData?.featured_ids ?? []).flatMap(id => places.find(place => place.id === id) ?? []).slice(0, 3);
+    const pinCentre = mapFocus ?? userCoords;
+    const transitCentre = pilotData?.neighbourhoods?.find(item => item.coordinates === mapFocus)?.coordinates ?? userCoords;
     const mapAssets=useMemo(()=>walkingData?.assets.filter(a=>(['rest','toilet','water','shelter','transit'].includes(a.kind) &&
         (a.source!=='gtfs'||a.id===destination?.id))||(a.kind==='entrance'&&a.parent_id===destination?.id))
-        .sort((a,b)=>metres([a.lng,a.lat],[userCoords[1],userCoords[0]])-metres([b.lng,b.lat],[userCoords[1],userCoords[0]])).slice(0,80)??[],[walkingData,destination,userCoords]);
+        .sort((a,b)=>metres([a.lng,a.lat],[pinCentre[1],pinCentre[0]])-metres([b.lng,b.lat],[pinCentre[1],pinCentre[0]])).slice(0,80)??[],[walkingData,destination,pinCentre]);
     const recommended: Mode = plan?.recommended ?? (isNight ? 'safest' : 'coolest');
 
     const visibleModes = MODES.filter(mode => plan?.routes[mode] && !(isNight && mode === 'coolest'));
@@ -984,6 +986,8 @@ function ResidentPageContent() {
                     informationLayer={informationLayer}
                     onInformationLayerChange={setInformationLayer}
                     focusLocation={mapFocus}
+                    neighbourhoods={view !== 'walk' && !pickingHazard ? pilotData?.neighbourhoods : undefined}
+                    onNeighbourhoodChange={setMapFocus}
                     liveLocation={livePoint ?? undefined}
                     selectedLocation={showReportModal ? reportPoint ?? undefined : undefined}
                     onLocationSelect={pickingHazard ? chooseReportPoint : undefined}
@@ -1003,7 +1007,7 @@ function ResidentPageContent() {
                 {view === 'explore' && <div className="tg-stack">
                     {communityButton}
                     {localPlaces}
-                    {pilotData && area !== 'elmina' && <TransitNearby context={pilotData} assets={walkingData?.assets ?? []} origin={userCoords} at={planningTime}
+                    {pilotData && area !== 'elmina' && <TransitNearby context={pilotData} assets={walkingData?.assets ?? []} origin={transitCentre} at={planningTime}
                         onChoose={selectSearchResult} onFocus={focusWalkPoint} />}
                     <ExploreWalks nodes={nodes} edges={edges} data={walkingData} request={toolRequest} hazards={hazards} onChoose={chooseFacility} onReturn={planReturn}
                     onLocate={handleGetLocation} locating={geoBusy} locationLabel={originLabel} locationMessage={geoMsg}

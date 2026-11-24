@@ -259,12 +259,27 @@ test('Next.js APIs with real PostgreSQL/PostGIS', { timeout: 60000 }, async (t) 
             const previousChecks=(await request('/api/walking-data?area=pasar-seni')).body.verifications;
             const station=walking.assets.find(asset=>asset.kind==='transit');
             const gate=walking.assets.find(asset=>asset.parent_id===station.id);
-            const extra={...gate,id:'70000000000000',external_id:'integration-supplemental-gate',name:'Test supplementary gate'};
-            const augmented={...bundle,walking:{...bundle.walking,assets:[...bundle.walking.assets,extra]},supplemental_assets:[extra]};
+            const extraNodes = [
+                { id: 100990000000009, lat: 3.1349, lng: 101.7120 },
+                { id: 100990000000010, lat: 3.1349, lng: 101.7121 },
+            ];
+            const extraEdge = { ...bundle.graph.edges[0], id: 123456789012, osm_way_id: 990000005,
+                from_node: extraNodes[0].id, to_node: extraNodes[1].id, length_m: 11,
+                geometry: extraNodes.map(({ lat, lng }) => [lng, lat]) };
+            const extra = { ...gate, id: '70000000000000', external_id: 'integration-supplemental-gate',
+                name: 'Test supplementary gate', lat: 3.1349, lng: 101.7120, edge_id: extraEdge.id, edge_fraction: 0 };
+            const augmented = { ...bundle,
+                graph: { ...bundle.graph, nodes: [...bundle.graph.nodes, ...extraNodes], edges: [...bundle.graph.edges, extraEdge] },
+                appended_graph: { nodes: extraNodes, edges: [extraEdge] },
+                walking: { ...bundle.walking, assets: [...bundle.walking.assets, extra] }, supplemental_assets: [extra],
+            };
             await seedPilotArea(fixture,augmented);
             await seedPilotArea(fixture,augmented);
             const after=(await request('/api/walking-data?area=pasar-seni')).body;
             assert.equal(after.assets.filter(asset=>asset.id===extra.id).length,1);
+            const expanded = (await request('/api/graph?area=pasar-seni')).body;
+            assert.equal(expanded.edges.filter(edge => edge.id === extraEdge.id).length, 1);
+            assert.deepEqual(expanded.edges.find(edge => edge.id === extraEdge.id).geometry, extraEdge.geometry);
             assert.deepEqual(after.verifications,previousChecks);
             const assets = body => review('/api/assets', body);
             assert.equal((await assets({kind:'entrance',name:'Wrong area parent',parent_id:walking.assets.find(a=>a.kind==='destination').id,lat:3.1425,lng:101.6945,area_id:'elmina'})).status,404);
