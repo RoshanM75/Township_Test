@@ -3,20 +3,25 @@ import { useState } from 'react';
 import { walkTimeline, type WalkLanguage } from '@/lib/walk-timeline';
 import type { JourneyRoute, VerificationRecord } from '@/lib/walking';
 import type { PathEdge } from '@/lib/routing';
+import { residentText, type ResidentLanguage } from '@/lib/resident-language';
 
-export default function WalkTimeline({ route, edges, records, onFocus }: { route: JourneyRoute; edges: PathEdge[]; records: VerificationRecord[]; onFocus?: (point: [number, number]) => void }) {
+export default function WalkTimeline({ route, edges, records, onFocus, language: appLanguage }: { route: JourneyRoute; edges: PathEdge[]; records: VerificationRecord[]; onFocus?: (point: [number, number]) => void; language?: ResidentLanguage }) {
     const [all, setAll] = useState(false);
-    const [language, setLanguage] = useState<WalkLanguage>(() => {
-        try { return localStorage.getItem('townshipgo:directions-language') === 'ms' ? 'ms' : 'en'; } catch { return 'en'; }
+    const [override, setOverride] = useState<WalkLanguage | undefined>(() => {
+        try {
+            const saved = localStorage.getItem('townshipgo:directions-language');
+            return saved === 'ms' || saved === 'en' ? saved : undefined;
+        } catch { return undefined; }
     });
+    const language = override ?? appLanguage ?? 'en';
     const canSpeak = typeof window !== 'undefined' && 'speechSynthesis' in window;
     const items = walkTimeline(route, edges, records, language);
     return <details className="rounded-xl border-2 border-slate-300 bg-white p-3 text-slate-900">
-        <summary className="min-h-8 cursor-pointer font-bold">Along your walk <span className="text-sm font-normal">· crossings, cover and rests</span></summary>
-        <label className="mt-2 block text-sm font-bold">Directions language
+        <summary className="min-h-11 cursor-pointer font-bold">{residentText(appLanguage ?? language, 'Along your walk')}</summary>
+        <label className="mt-2 block font-bold">{residentText(appLanguage ?? language, 'Directions language')}
             <select className="tg-input mt-1" value={language} onChange={event => {
                 const value = event.target.value === 'ms' ? 'ms' : 'en';
-                setLanguage(value);
+                setOverride(value);
                 try { localStorage.setItem('townshipgo:directions-language', value); } catch { /* Keep this session's choice. */ }
             }}>
                 <option value="en">English</option><option value="ms" lang="ms">Bahasa Melayu</option>

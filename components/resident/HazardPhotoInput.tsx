@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Camera, Loader2, Sparkles, X } from 'lucide-react';
 import { HYPOTHESIS_TEMPLATE, PHOTO_PROMPTS, readPhotoScores, type PhotoReading, type PhotoScore } from '@/lib/photo-hazard';
+import { residentText, type ResidentLanguage } from '@/lib/resident-language';
 
 /* The model runs in the browser through transformers.js. It is loaded from a CDN at runtime
    (kept out of the bundle) and only when someone adds a photo; the browser caches it after that.
@@ -72,9 +73,10 @@ interface Props {
     /** Called with the model's reading so the form can choose a category and fill in details. */
     onReading: (reading: PhotoReading) => void;
     kindLabel: (kind: PhotoReading['kind']) => string;
+    language?: ResidentLanguage;
 }
 
-export default function HazardPhotoInput({ photo, onPhoto, onReading, kindLabel }: Props) {
+export default function HazardPhotoInput({ photo, onPhoto, onReading, kindLabel, language = 'en' }: Props) {
     const inputId = useId();
     const inputRef = useRef<HTMLInputElement>(null);
     const runRef = useRef(0);
@@ -118,18 +120,18 @@ export default function HazardPhotoInput({ photo, onPhoto, onReading, kindLabel 
 
     return (
         <div className="tg-photo">
-            <p className="tg-label">Photo (optional)</p>
+            <p className="tg-label">{residentText(language, 'Photo (optional)')}</p>
             <div className="tg-photo-row">
                 {photo ? (
                     <div className="tg-photo-thumb">
                         {/* eslint-disable-next-line @next/next/no-img-element -- local data URL preview */}
                         <img src={photo} alt="Your hazard photo" />
-                        <button type="button" onClick={clear} aria-label="Remove photo"><X size={16} aria-hidden /></button>
+                        <button type="button" onClick={clear} aria-label={residentText(language, 'Remove photo')}><X size={17} aria-hidden /></button>
                     </div>
                 ) : (
                     <label htmlFor={inputId} className="tg-photo-add">
                         <Camera size={22} aria-hidden />
-                        <span>Add photo</span>
+                        <span>{residentText(language, 'Add photo')}</span>
                     </label>
                 )}
                 <input ref={inputRef} id={inputId} type="file" accept="image/*" className="sr-only"

@@ -60,9 +60,9 @@ export function transitDestinationId(stop: TransitStop) {
 }
 
 /** An approximate link ends on the mapped path. GTFS cannot verify crossing or boarding access. */
-export function transitApproachAssets(context: PilotContext): WalkingAsset[] {
+export function transitApproachAssets(context: PilotContext, includeUnlinkedRail = false): WalkingAsset[] {
     return context.transit.stops.flatMap(stop => {
-        if (!stop.approach || stop.walking_asset_id) return [];
+        if (stop.walking_asset_id || (!stop.approach && (!includeUnlinkedRail || stop.agency !== 'rapid-rail-kl'))) return [];
         const { approach } = stop;
         const id = `gtfs:${stop.id}`;
         const base: WalkingAsset = {
@@ -73,12 +73,12 @@ export function transitApproachAssets(context: PilotContext): WalkingAsset[] {
             properties: { gtfs_stop: true, ...(stop.code ? { station_ref: stop.code } : {}) },
             edge_id: null, edge_fraction: null, connection_distance_m: null, anchor_lat: null, anchor_lng: null,
         };
-        return [base, {
+        return approach ? [base, {
             ...base, id: `${id}:approach`, external_id: `${id}:approach`, parent_id: id, kind: 'entrance',
             name: `Footpath near ${stop.name}`, lat: approach.lat, lng: approach.lng,
             edge_id: approach.edge_id, edge_fraction: approach.fraction, connection_distance_m: 0,
             anchor_lat: approach.lat, anchor_lng: approach.lng,
             properties: { connection_model: 'approximate_approach', stop_offset_m: Math.round(approach.distance_m) },
-        }];
+        }] : [base];
     });
 }
