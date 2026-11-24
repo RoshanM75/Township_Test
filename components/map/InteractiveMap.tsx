@@ -7,10 +7,13 @@ import type { WalkingAsset, VerificationRecord } from '@/lib/walking';
 import type { PathEdge } from '@/lib/routing';
 import { environmentSegments, environmentCoverage, type EnvironmentLayer } from '@/lib/environment';
 import { DEFAULT_ORIGIN } from '@/lib/precinct';
+import { residentText, type ResidentLanguage } from '@/lib/resident-language';
+import { MAP_CAUTION, ROOF_COVER, ROUTE_ALTERNATIVE, ROUTE_OUTLINE, WALK_ROUTE, WALK_ROUTE_HC, mapFacilitySymbol } from './walking-map-theme';
 import { MapContainer, TileLayer, GeoJSON, Pane, Marker, Popup, Polyline, Tooltip, CircleMarker, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import type { FeatureCollection } from 'geojson';
 import 'leaflet/dist/leaflet.css';
+import './resident-map.css';
 import { Plus, Minus, Route as RouteIcon, Layers } from 'lucide-react';
 
 interface RouteItem {
@@ -37,10 +40,14 @@ export interface InteractiveMapProps {
     reports?: ReportMarker[];
     startCoords?: [number, number];
     endCoords?: [number, number];
+    endDetail?: string;
     /** "Start" for the default origin, "You" when using GPS */
     startLabel?: string;
     reduceMotion?: boolean;
     highContrast?: boolean;
+    labelScale?: number;
+    language?: ResidentLanguage;
+    routeRoof?: [number, number][][];
 
     /**
      * Admin dashboard mode. When `pins` is given the map shows numbered, ranked defect pins
@@ -93,19 +100,16 @@ function LocalBasemap({ url }: { url: string }) {
         }} />;
 }
 
-const assetIcon = (kind: string) => L.divIcon({ className: '', iconSize: [28,28], iconAnchor: [14,14],
-    html: `<span style="display:flex;align-items:center;justify-content:center;width:28px;height:28px;border:2px solid #fff;border-radius:6px;background:#1D4ED8;color:white;font:bold 14px system-ui;box-shadow:0 1px 4px #333">${kind === 'rest' ? 'S' : kind === 'entrance' ? 'E' : kind === 'toilet' ? 'WC' : kind === 'water' ? 'W' : '+'}</span>` });
+const assetIcon = (symbol: string) => L.divIcon({ className: 'tg-leaflet-facility', iconSize: [44,44], iconAnchor: [22,22],
+    html: `<span>${symbol}</span>` });
 
-/* ---------- Brand colours (muted Sime Darby red) ---------- */
-const BRAND = '#A4262C';
-const BRAND_HC = '#7A0F14';
 const WARN = '#F2B400';
 const INK = '#1B1F23';
 
 /* ---------- Walk mode pins: shape + text label, never colour alone ---------- */
 function labelPill(text: string, bg: string, fg: string) {
     return `<div style="margin-top:4px;padding:2px 10px;border-radius:999px;background:${bg};color:${fg};
-        font:800 13px/1.3 system-ui,sans-serif;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);
+        font:800 .875rem/1.3 system-ui,sans-serif;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);
         white-space:nowrap">${text}</div>`;
 }
 
@@ -177,6 +181,7 @@ function MapBehavior({
     brand,
     fitLabel,
     maxZoom,
+    language,
 }: {
     points: [number, number][];
     focus: [number, number] | null;
@@ -184,6 +189,7 @@ function MapBehavior({
     brand: string;
     fitLabel: string;
     maxZoom: number;
+    language: ResidentLanguage;
 }) {
     const map = useMap();
 
@@ -251,16 +257,16 @@ function MapBehavior({
                 ref={stopPropagation}
                 style={{ position: 'absolute', top: 12, right: 12, zIndex: 1000, display: 'flex', flexDirection: 'column', gap: 10 }}
             >
-                <button type="button" aria-label="Zoom in" style={squareBtn} onClick={() => map.zoomIn()}>
+                <button type="button" aria-label={residentText(language, 'Zoom in')} style={squareBtn} onClick={() => map.zoomIn()}>
                     <Plus size={26} strokeWidth={3} aria-hidden />
                 </button>
-                <button type="button" aria-label="Zoom out" style={squareBtn} onClick={() => map.zoomOut()}>
+                <button type="button" aria-label={residentText(language, 'Zoom out')} style={squareBtn} onClick={() => map.zoomOut()}>
                     <Minus size={26} strokeWidth={3} aria-hidden />
                 </button>
             </div>
 
             {/* Fit everything: bottom left, away from the pins and the zoom buttons */}
-            <div ref={stopPropagation} style={{ position: 'absolute', left: 12, bottom: 12, zIndex: 1000 }}>
+            <div className="tg-leaflet-fit" ref={stopPropagation} style={{ position: 'absolute', left: 12, bottom: 34, zIndex: 1000 }}>
                 <button
                     type="button"
                     aria-label={fitLabel}
@@ -270,10 +276,10 @@ function MapBehavior({
                         width: 'auto',
                         padding: '0 14px',
                         gap: 8,
-                        background: brand,
-                        borderColor: '#fff',
-                        color: '#fff',
-                        font: '800 14px system-ui,sans-serif',
+                        background: ROUTE_OUTLINE,
+                        border: '1px solid #ded2ca',
+                        color: brand,
+                        font: '700 1rem system-ui,sans-serif',
                     }}
                 >
                     <RouteIcon size={20} aria-hidden />
@@ -284,23 +290,19 @@ function MapBehavior({
     );
 }
 
-/* Dash patterns give each route its own look without relying on colour */
-const DASH: Record<string, string | undefined> = {
-    direct: undefined, // solid
-    coolest: '18 12', // dashed
-    sheltered: '10 7 2 7', // dash-dot
-    safest: '1 16', // dotted (round caps)
-};
-
 export default function InteractiveMap({
     routes = [],
     activeRouteId = '',
     reports = [],
     startCoords = DEFAULT_ORIGIN,
     endCoords: requestedEndCoords,
+    endDetail,
     startLabel = 'Start',
     reduceMotion = false,
     highContrast = false,
+    labelScale = 1,
+    language = 'en',
+    routeRoof = [],
     pins,
     selectedPinId = null,
     hoveredPinId = null,
@@ -319,8 +321,9 @@ export default function InteractiveMap({
 }: InteractiveMapProps) {
     const endCoords=requestedEndCoords??startCoords;
     const hasDestination=Boolean(requestedEndCoords);
-    const brand = highContrast ? BRAND_HC : BRAND;
+    const brand = highContrast ? WALK_ROUTE_HC : WALK_ROUTE;
     const overview = pins !== undefined;
+    const largeTiles = labelScale > 1;
     const [localLayer, setLocalLayer] = useState<EnvironmentLayer | 'routes'>('routes');
     const layer = informationLayer ?? localLayer;
     const layerEdges = environment?.edges, layerRecords = environment?.records, layerTime = environment?.at;
@@ -330,7 +333,8 @@ export default function InteractiveMap({
 
     /* ----- Walk mode ----- */
     const startIcon = useMemo(() => makePin('start', startLabel, brand), [startLabel, brand]);
-    const endIcon = useMemo(() => makePin('end', 'Destination', brand), [brand]);
+    const endLabel = residentText(language, 'Destination');
+    const endIcon = useMemo(() => makePin('end', endLabel, brand), [brand, endLabel]);
 
     // Group problems reported at (almost) the same spot, and nudge a group aside if it sits on the start or destination pin
     const hazardGroups = useMemo(() => {
@@ -418,16 +422,20 @@ export default function InteractiveMap({
             >
                 {localBasemap && <Pane name="pilot-basemap" style={{ zIndex: 190 }}><LocalBasemap url={localBasemap} /></Pane>}
                 <TileLayer
+                    key={largeTiles ? 'large-labels' : 'regular-labels'}
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'
                     url={process.env.NEXT_PUBLIC_OSM_TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'}
-                    maxNativeZoom={19}
+                    tileSize={largeTiles ? 512 : 256}
+                    zoomOffset={largeTiles ? -1 : 0}
+                    minNativeZoom={largeTiles ? 1 : 0}
+                    maxNativeZoom={largeTiles ? 20 : 19}
                 />
                 <LocationPicker onSelect={onLocationSelect} />
                 {segments.map(segment => {
                     const unknown = segment.value === null;
                     const strength = typeof segment.value === 'boolean' ? Number(segment.value) : segment.value ?? 0;
                     const color = unknown ? '#64748b' : layer === 'paths' ? '#475569' : layer === 'observations' ? '#5b55a1'
-                        : segment.source === 'reported' ? '#b45309' : strength >= .65 ? '#16765e' : '#b45309';
+                        : segment.source === 'reported' || strength < .65 ? MAP_CAUTION : ROOF_COVER;
                     return <Polyline key={`environment:${layer}:${segment.id}`} positions={segment.geometry.map(([lng, lat]) => [lat, lng] as [number, number])}
                         pathOptions={{ color, weight: unknown ? 2 : 4, opacity: unknown ? .35 : .8,
                             dashArray: unknown ? '3 7' : segment.source === 'checked' ? undefined : '9 5' }}>
@@ -435,9 +443,10 @@ export default function InteractiveMap({
                         <Popup {...popupProps}><strong>{segment.name}</strong><p>{segment.detail}</p></Popup>
                     </Polyline>;
                 })}
-                {selectedLocation && <Marker position={selectedLocation} icon={assetIcon('selection')}><Popup>Selected mapping position</Popup></Marker>}
-                {focusLocation && <Marker position={focusLocation} icon={assetIcon('selection')}><Popup>Selected map point</Popup></Marker>}
-                {assets.filter(a => a.kind !== 'destination').map(asset => <Marker key={`asset:${asset.id}`} position={[asset.lat, asset.lng]} icon={assetIcon(asset.kind)}>
+                {selectedLocation && <Marker position={selectedLocation} icon={assetIcon('◎')}><Popup>{residentText(language, 'Incident location')}</Popup></Marker>}
+                {focusLocation && <Marker position={focusLocation} icon={assetIcon('◎')}><Popup>{residentText(language, 'Selected map point')}</Popup></Marker>}
+                {assets.map(asset => mapFacilitySymbol(asset) && <Marker key={`asset:${asset.id}`} position={[asset.lat, asset.lng]} icon={assetIcon(mapFacilitySymbol(asset))}
+                    eventHandlers={{ add: ariaLabelOnAdd(asset.name) }}>
                     <Tooltip>{asset.name}</Tooltip>
                     <Popup><strong>{asset.name}</strong><p>{asset.kind === 'rest' ? 'Mapped seating / rest facility' : asset.kind === 'entrance' ? 'Mapped access point' : asset.kind}</p><p>Source: {asset.source}. See route details and verification records for current checks.</p></Popup>
                 </Marker>)}
@@ -447,8 +456,9 @@ export default function InteractiveMap({
                     focus={focus}
                     reduceMotion={reduceMotion}
                     brand={brand}
-                    fitLabel={fitLabel ?? (overview ? 'Show all' : 'Whole route')}
+                    fitLabel={fitLabel ?? (overview ? 'Show all' : residentText(language, 'Whole route'))}
                     maxZoom={overview ? 17 : 18}
+                    language={language}
                 />
                 {liveLocation && <CircleMarker center={liveLocation} radius={8} pathOptions={{ color: '#fff', weight: 3, fillColor: '#1d4ed8', fillOpacity: 1 }}><Tooltip>Your last usable GPS position</Tooltip></CircleMarker>}
 
@@ -484,8 +494,8 @@ export default function InteractiveMap({
                                     key={`${route.id}-casing`}
                                     positions={route.coordinates}
                                     pathOptions={{
-                                        color: '#fff',
-                                        weight: isActive ? 14 : 8,
+                                        color: ROUTE_OUTLINE,
+                                        weight: isActive ? 11 : 5,
                                         opacity: 0.95,
                                         lineCap: 'round',
                                         lineJoin: 'round',
@@ -495,22 +505,25 @@ export default function InteractiveMap({
                         })}
                         {ordered.map((route) => {
                             const isActive = route.id === activeRouteId;
-                            const dash = DASH[route.id];
                             return (
                                 <Polyline
                                     key={route.id}
                                     positions={route.coordinates}
                                     pathOptions={{
-                                        color: isActive ? brand : '#4B5563',
-                                        weight: isActive ? 8 : 4,
+                                        color: isActive ? brand : ROUTE_ALTERNATIVE,
+                                        weight: isActive ? 7 : 3,
                                         opacity: isActive ? 1 : 0.8,
-                                        dashArray: dash,
+                                        dashArray: isActive ? undefined : '3 5',
                                         lineCap: 'round',
                                         lineJoin: 'round',
                                     }}
                                 />
                             );
                         })}
+                        {routeRoof.map((line, index) => <Polyline key={`roof:${index}`} positions={line} interactive={false}
+                            pathOptions={{ color: ROOF_COVER, weight: 7, lineCap: 'round' }} />)}
+                        {routeRoof.map((line, index) => <Polyline key={`roof-pattern:${index}`} positions={line} interactive={false}
+                            pathOptions={{ color: ROUTE_OUTLINE, weight: 2, dashArray: '1 5', lineCap: 'round' }} />)}
 
                         {/* Problems reported by residents (drawn under the start and destination pins) */}
                         {hazardGroups.map((g) => (
@@ -541,9 +554,9 @@ export default function InteractiveMap({
                             </Marker>
                         ))}
 
-                        {hasDestination&&<Marker position={endCoords} icon={endIcon} zIndexOffset={900} eventHandlers={{ add: ariaLabelOnAdd('Destination') }}>
+                        {hasDestination&&<Marker position={endCoords} icon={endIcon} zIndexOffset={900} eventHandlers={{ add: ariaLabelOnAdd(endLabel) }}>
                             <Popup {...popupProps}>
-                                <div style={{ ...popupText, fontWeight: 800 }}>Where you are going</div>
+                                <div style={{ ...popupText, fontWeight: 800 }}>{endDetail ?? endLabel}</div>
                             </Popup>
                         </Marker>}
 

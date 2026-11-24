@@ -1,6 +1,8 @@
 # Everyday walking tools
 
-The planner has four sections: **Explore, Plan, Walk and Saved**. On phones, **Expand panel** gives controls the available space; **Show map** restores the map. Saved uses the available space for the collection. Large text, high contrast and reduced motion remain available.
+The **Map** screen has a compact route summary with **Start walk**. Use **Compare routes** to see travel time, mapped roof cover and access checks. Tap **Minimise** to make more room for the map. **Nearby** finds mapped toilets, seats and clinics. **Aa** sets the app language, text size, contrast and motion preference. When a walk starts, the **Walk** section shows the route cue and pause or resume action above its expandable controls.
+
+**Reports** shows your submissions on this browser. In the server version, report history displays the dates for Reported, Checked and Fixed when those stages occur. Report photos are optional and kept on the device. After finishing a walk, **Share a local shortcut** opens a draft for editing and review. A recorded trace can be trimmed before submission. GitHub Pages saves reports and shortcut drafts on the device.
 
 ## The eight features
 

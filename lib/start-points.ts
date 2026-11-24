@@ -54,6 +54,18 @@ export function presetStartPoints(context: PilotContext, assets: WalkingAsset[],
         }
         if (options.length === 7) break;
     }
-    return [...options, ...nearbyStarts.filter(point => !options.some(option =>
-        option.coordinates[0] === point.coordinates[0] && option.coordinates[1] === point.coordinates[1]))];
+    const transit = new Set(assets.filter(asset => asset.kind === 'transit').map(asset => asset.id));
+    const entrances = assets.flatMap(entrance => {
+        if (entrance.parent_id === null || !transit.has(entrance.parent_id) || entrance.kind !== 'entrance'
+            || entrance.properties.connection_model !== 'mapped_entrance' || entrance.edge_id === null || entrance.edge_fraction === null) return [];
+        const edge = graph.edges.get(entrance.edge_id);
+        if (!edge || !visited.has(edge.from_node) || !visited.has(edge.to_node)) return [];
+        const [lng, lat] = pointAt(edge.geometry, entrance.edge_fraction);
+        const coordinates: [number, number] = [lat, lng];
+        return pointInPilot(coordinates, context.area_id) ? [{ id: entrance.id, label: entrance.name, coordinates }] : [];
+    });
+    for (const point of [...nearbyStarts, ...entrances]) {
+        if (!options.some(option => option.coordinates[0] === point.coordinates[0] && option.coordinates[1] === point.coordinates[1])) options.push(point);
+    }
+    return options;
 }

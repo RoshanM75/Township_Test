@@ -1,10 +1,11 @@
 'use client';
 import { PILOTS,isPilotAvailable,type PilotId } from '@/lib/pilots';
-export default function PilotSelector({area,onChange}:{area:PilotId;onChange:(id:PilotId)=>void}){
-    return <label className="block min-w-0 text-sm font-bold text-slate-900"><span className="sr-only">Walking area</span><select value={area} onChange={e=>onChange(e.target.value as PilotId)} className="min-h-11 w-full rounded-xl border border-slate-300 bg-white px-2 py-2 font-semibold">
+import { residentText, type ResidentLanguage } from '@/lib/resident-language';
+export default function PilotSelector({area,onChange,language='en'}:{area:PilotId;onChange:(id:PilotId)=>void;language?: ResidentLanguage}){
+    return <label className="tg-area-select"><span className="sr-only">{residentText(language, 'Walking area')}</span><select value={area} onChange={e=>onChange(e.target.value as PilotId)}>
         {Object.values(PILOTS).map(pilot => (
             <option key={pilot.id} value={pilot.id} disabled={!isPilotAvailable(pilot.id)}>
-                {pilot.short_name}{isPilotAvailable(pilot.id) ? '' : ' · data pending'}
+                {pilot.short_name}{isPilotAvailable(pilot.id) ? '' : ' · ' + residentText(language, 'Data pending')}
             </option>
         ))}
     </select></label>;

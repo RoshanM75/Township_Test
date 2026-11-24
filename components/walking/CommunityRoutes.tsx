@@ -11,6 +11,7 @@ import { addTrackFix, emptyTrack } from '@/lib/walk-tracking';
 import { PILOTS, pointInPilot, type PilotId } from '@/lib/pilots';
 import { IS_PAGES_PREVIEW } from '@/lib/site';
 import type { StartPoint } from '@/lib/start-points';
+import { residentText, type ResidentLanguage } from '@/lib/resident-language';
 
 const Map = dynamic(() => import('@/components/map/InteractiveMap'), { ssr: false });
 const draftKey = (area: PilotId) => `townshipgo:community-draft:${area}`;
@@ -49,10 +50,13 @@ interface Props {
     now: string;
     onPlan: (route: CommunityRoute) => void;
     onShared: () => void;
+    initialWalk?: CompletedWalk;
+    language?: ResidentLanguage;
 }
 
-export default function CommunityRoutes({ area, dataset, graph, walks, startPoints, routes, now, onPlan, onShared }: Props) {
-    const [editing, setEditing] = useState(false);
+export default function CommunityRoutes({ area, dataset, graph, walks, startPoints, routes, now, onPlan, onShared, initialWalk, language = 'en' }: Props) {
+    const [editing, setEditing] = useState(!!initialWalk);
+    const [fromWalk, setFromWalk] = useState(initialWalk);
     const [selected, setSelected] = useState<CommunityRoute | null>(null);
     const [receipt, setReceipt] = useState(() => readStored(receiptKey(area)));
     const [mine, setMine] = useState<CommunityRoute | null>(null);
@@ -68,9 +72,9 @@ export default function CommunityRoutes({ area, dataset, graph, walks, startPoin
     }, [receipt, area, refresh]);
     const nearby = routes.filter(route => route.dataset_id === dataset && route.path);
     const inspected = nearby.find(route => route.id === selected?.id);
-    if (editing) return <CommunityRouteEditor area={area} dataset={dataset} graph={graph} walks={walks} startPoints={startPoints}
-        onExit={() => setEditing(false)} onSubmitted={(route, submission) => {
-            setMine(route); setReceipt(submission); setEditing(false); onShared();
+    if (editing) return <CommunityRouteEditor area={area} dataset={dataset} graph={graph} walks={walks} startPoints={startPoints} initialWalk={fromWalk} language={language}
+        onExit={() => { setEditing(false); setFromWalk(undefined); }} onSubmitted={(route, submission) => {
+            setMine(route); setReceipt(submission); setEditing(false); setFromWalk(undefined); onShared();
         }} />;
     return <div className="tg-stack">
         <button type="button" className="tg-btn tg-btn-primary" onClick={() => setEditing(true)}>
@@ -115,20 +119,27 @@ export function communityDate(value: string | null) {
     return value ? new Date(value).toLocaleDateString('en-MY', { timeZone: 'Asia/Kuala_Lumpur', dateStyle: 'medium' }) : '';
 }
 
-function CommunityRouteEditor({ area, dataset, graph, walks, startPoints, onExit, onSubmitted }: Pick<Props, 'area' | 'dataset' | 'graph' | 'walks' | 'startPoints'> & {
+function CommunityRouteEditor({ area, dataset, graph, walks, startPoints, initialWalk, language = 'en', onExit, onSubmitted }: Pick<Props, 'area' | 'dataset' | 'graph' | 'walks' | 'startPoints' | 'initialWalk' | 'language'> & {
     onExit: () => void;
     onSubmitted: (route: CommunityRoute, submission: string) => void;
 }) {
-    const [draft] = useState(() => readDraft(area, dataset));
+    const [draft] = useState(() => initialWalk ? null : readDraft(area, dataset));
+    const [trace] = useState<RoutePoint[]>(() => {
+        if (!initialWalk || (initialWalk.area_id ?? 'elmina') !== area) return [];
+        const fixes = initialWalk.track.fixes.flatMap(({ lat, lng }): RoutePoint[] => pointInPilot([lat, lng], area) ? [[lat, lng]] : []);
+        return fixes.length >= 4 ? fixes : [];
+    });
     const [title, setTitle] = useState(draft?.title ?? '');
     const [notes, setNotes] = useState(draft?.notes ?? '');
-    const [points, setPoints] = useState<RoutePoint[]>(draft?.points ?? []);
-    const [trimStart, setTrimStart] = useState(0);
-    const [trimEnd, setTrimEnd] = useState(0);
+    const [points, setPoints] = useState<RoutePoint[]>(draft?.points ?? trace);
+    const [trimStart, setTrimStart] = useState(trace.length ? 1 : 0);
+    const [trimEnd, setTrimEnd] = useState(trace.length ? 1 : 0);
     const [recording, setRecording] = useState(false);
     const [confirmed, setConfirmed] = useState(false);
     const [busy, setBusy] = useState(false);
-    const [message, setMessage] = useState('');
+    const [message, setMessage] = useState(initialWalk ? (trace.length
+        ? 'Review the public part of your recording and trim any private stops.'
+        : 'Draw the public shortcut you walked on the map.') : '');
     const [preview, setPreview] = useState<CommunityPath | null | undefined>(undefined);
     const lastDraft = useRef(draft);
     const track = useRef(emptyTrack());
@@ -218,8 +229,8 @@ function CommunityRouteEditor({ area, dataset, graph, walks, startPoints, onExit
     const line = preview?.coordinates ?? publicPoints;
     return <div className="tg-stack">
         <button type="button" className="tg-text-action self-start" onClick={onExit}>Back to community routes</button>
-        <label className="tg-label">Route name<input className="tg-input" maxLength={100} value={title} onChange={event => setTitle(event.target.value)} /></label>
-        <label className="tg-label">Local notes<textarea className="tg-input" maxLength={800} rows={2} value={notes}
+        <label className="tg-label">{residentText(language, 'Route name')}<input className="tg-input" maxLength={100} value={title} onChange={event => setTitle(event.target.value)} /></label>
+        <label className="tg-label">{residentText(language, 'Local notes')}<textarea className="tg-input" maxLength={800} rows={2} value={notes}
             placeholder="For example, the covered shortcut between the station and market"
             onChange={event => setNotes(event.target.value)} /></label>
         <fieldset disabled={recording || busy} className="tg-stack">
@@ -280,8 +291,8 @@ function CommunityRouteEditor({ area, dataset, graph, walks, startPoints, onExit
             <input type="checkbox" className="h-5 w-5 shrink-0" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} />
             My waypoints and notes contain only places the public can use.
         </label>}
-        <button type="button" className="tg-btn" disabled={busy || recording} onClick={saveDraft}>Save draft on this device</button>
+        <button type="button" className="tg-btn" disabled={busy || recording} onClick={saveDraft}>{residentText(language, 'Save draft on this device')}</button>
         {!IS_PAGES_PREVIEW && <button type="button" className="tg-btn tg-btn-primary" disabled={!confirmed || !title.trim() || publicPoints.length < 2 || busy || recording}
-            onClick={() => void submit()}>{busy ? 'Submitting…' : 'Submit for review'}</button>}
+            onClick={() => void submit()}>{residentText(language, busy ? 'Saving…' : 'Submit for review')}</button>}
     </div>;
 }
