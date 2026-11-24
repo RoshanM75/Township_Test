@@ -7,7 +7,7 @@ import { sitePath } from '@/lib/site';
 import type { PilotId, PilotNeighbourhood } from '@/lib/pilots';
 import { environmentCoverage, environmentSegments, type EnvironmentLayer } from '@/lib/environment';
 import type { InteractiveMapProps } from './InteractiveMap';
-import { residentText, type ResidentLabel } from '@/lib/resident-language';
+import { malaysiaTimeLabel, residentText, type ResidentLabel } from '@/lib/resident-language';
 import './resident-map.css';
 
 const Map2D = dynamic(() => import('./InteractiveMap'), { ssr: false });
@@ -29,8 +29,8 @@ export default function ResidentMap({
     const MapModeIcon = mode === '3d' ? Box : MapIcon;
     const { edges, records, at } = mapProps.environment ?? {};
     const segments = useMemo(() => informationLayer !== 'routes' && edges && records && at
-        ? environmentSegments(edges, records, at, informationLayer) : [],
-    [informationLayer, edges, records, at]);
+        ? environmentSegments(edges, records, at, informationLayer, mapProps.solar) : [],
+    [informationLayer, edges, records, at, mapProps.solar]);
     const coverage = environmentCoverage(segments);
     const neighbourhood = neighbourhoods?.find(item => item.coordinates === mapProps.focusLocation);
 
@@ -43,7 +43,7 @@ export default function ResidentMap({
     return (
         <div data-map-mode={mode} className="resident-map absolute inset-0" aria-label={t('Walking map')}>
             {mode === '2d'
-                ? <Map2D {...mapProps} language={language} informationLayer={informationLayer} showLayerControls={false}
+                ? <Map2D {...mapProps} language={language} informationLayer={informationLayer} showLayerControls={false} conditionSegments={segments}
                     localBasemap={sitePath(`/map-area/${area}.geojson`)} />
                 : <Map3D {...mapProps} language={language} area={area} segments={segments} informationLayer={informationLayer} onUnavailable={fallback} />}
             <div className="tg-map-controls">
@@ -86,12 +86,20 @@ export default function ResidentMap({
                         : 'Places and streets are mapped here. Walking connections need more detail.'}
                 </p>}
                 {failed && <p role="status" className="tg-map-status">{t('3D is unavailable on this device.')}</p>}
-                {informationLayer !== 'routes' && <p role="status" className="tg-map-status">
+                {informationLayer === 'shade' && at && <p role="status" className="tg-map-status">{malaysiaTimeLabel(at, language)} MYT</p>}
+                {informationLayer !== 'routes' && informationLayer !== 'shade' && <p role="status" className="tg-map-status">
                     {informationLayer === 'paths' ? `${coverage.total} mapped paths`
                         : `${coverage.known} of ${coverage.total} paths with data${coverage.modelled ? ` · ${coverage.modelled} estimated` : ''} · dashed gray means unknown`}
                 </p>}
             </div>
-            {!!mapProps.routeRoof?.length && <p className="tg-map-roof-key"><span aria-hidden />{t('Mapped roof cover')}</p>}
+            <div className="tg-map-keys">
+                {informationLayer === 'shade' && <div className="tg-map-roof-key tg-map-shade-key">
+                    <span><i data-shade="sun" aria-hidden />{t('Estimated direct sun')}</span>
+                    <span><i data-shade="shade" aria-hidden />{t('Estimated shade')}</span>
+                    <span><i data-shade="unknown" aria-hidden />{t('Unknown')}</span>
+                </div>}
+                {!!mapProps.routeRoof?.length && <p className="tg-map-roof-key"><span aria-hidden />{t('Mapped roof cover')}</p>}
+            </div>
         </div>
     );
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, Suspense } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, Suspense } from 'react';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { useSearchParams,useRouter } from 'next/navigation';
@@ -14,15 +14,20 @@ import { loadGraph as fetchGraph, loadHazards, loadReports, submitReport, loadWa
 import { IS_PAGES_PREVIEW, sitePath } from '@/lib/site';
 import type { MaintenanceDefect } from '@/lib/types';
 import { useClientReady } from '@/lib/use-client-ready';
-import { readWalkParameters } from '@/lib/walk-parameters';
+import { readSharedDeparture, readWalkParameters } from '@/lib/walk-parameters';
 import { DESTINATIONS } from '@/lib/precinct';
 import { normaliseNeeds } from '@/lib/journeys';
 import { evidenceFor, malaysiaHour } from '@/lib/verification';
-import { forecastAt, type WalkingWeather } from '@/lib/comfort';
+import { forecastAt, malaysiaInput, fromMalaysiaInput, type WalkingWeather } from '@/lib/comfort';
 import type { WalkingData, WalkingAsset, JourneyPlan } from '@/lib/walking';
 import RouteQualityBar from '@/components/walking/RouteQualityBar';
 import WalkingRequirements from '@/components/walking/WalkingRequirements';
 import DepartureControl from '@/components/walking/DepartureControl';
+import DepartureOptions from '@/components/walking/DepartureOptions';
+import { solarModel, type ShadeDataset } from '@/lib/solar-shade';
+import { SHADE_CHANGES, shadeChangeLabel, type ShadeChange } from '@/lib/shade-corrections';
+import { spotDetails } from '@/lib/shade-display';
+import type { SearchCommand } from '@/lib/planning-dispatch';
 import RouteDetails from '@/components/walking/RouteDetails';
 import PlaceDiscovery from '@/components/walking/PlaceDiscovery';
 import WalkingConditions from '@/components/walking/WalkingConditions';
@@ -48,11 +53,11 @@ import PilotSources from '@/components/walking/PilotSources';
 import PilotUnavailable from '@/components/walking/PilotUnavailable';
 import { PILOTS,pilotFromParams,isPilotAvailable,pointInPilot,type PilotId,type PilotContext } from '@/lib/pilots';
 import { usePlannerResult } from '@/lib/use-planner';
-import { metres, pointAt } from '@/lib/walking-geometry';
+import { metres, pointAt, projectPoint } from '@/lib/walking-geometry';
 import CommunityRoutes from '@/components/walking/CommunityRoutes';
 import type { CommunityRoute } from '@/lib/community-routes';
 import { checkedRouteReports } from '@/lib/report-status';
-import { residentText, type ResidentLabel, type ResidentLanguage } from '@/lib/resident-language';
+import { malaysiaTimeLabel, residentText, type ResidentLabel, type ResidentLanguage } from '@/lib/resident-language';
 import { residentPlaceName, ROUTE_MODES, routeLabel, routeRoofLines, searchResidentPlaces, walkWeather } from '@/lib/resident-walking';
 import { transitApproachAssets } from '@/lib/transit';
 
@@ -70,7 +75,7 @@ import type { WeatherWarnings } from '@/lib/weather-warnings';
 import HazardPhotoInput from '@/components/resident/HazardPhotoInput';
 import NearbyFacilities from '@/components/resident/NearbyFacilities';
 import ReportHistory, { issueLabel, type DeviceReport } from '@/components/resident/ReportHistory';
-import RouteComparison, { RouteChecks, RouteCoverage } from '@/components/resident/RouteComparison';
+import RouteComparison, { RouteChecks, RouteCoverage, RouteSun } from '@/components/resident/RouteComparison';
 import { photoDescription, type PhotoReading } from '@/lib/photo-hazard';
 import './resident.css';
 
@@ -87,6 +92,7 @@ const HAZARD_OPTIONS: { kind: HazardKind; Icon: LucideIcon }[] = [
     { kind: 'light_out', Icon: Lightbulb },
     { kind: 'no_ramp', Icon: Accessibility },
     { kind: 'no_shade', Icon: Sun },
+    { kind: 'shade_correction', Icon: Sun },
     { kind: 'details_outdated', Icon: MapPin },
 ];
 
@@ -205,9 +211,10 @@ function SettingSwitch({ label, hint, checked, onChange, language }: {
 function ResidentPageContent() {
     const searchParams = useSearchParams();
     const router=useRouter();
+    const openingShared = ['destId', 'startLat', 'community', 'shortcut', 'return'].some(key => searchParams.has(key));
     const [boot]=useState(()=>{
         try {const collection=readLibrary(localStorage),draft=readWalkDraft(localStorage);const active=draft&&!collection.library.history.some(w=>w.id===draft.id)?draft:null;
-            return {collection,draft:active,area:active?(active.pack.area_id??'elmina'):pilotFromParams(searchParams)};
+            return {collection,draft:active,area:active&&!openingShared?(active.pack.area_id??'elmina'):pilotFromParams(searchParams)};
         }catch{return {collection:{library:emptyLibrary(),warning:'Device storage is unavailable. You can still plan and download walk packs.'},draft:null,area:pilotFromParams(searchParams)};}
     });
     const area=boot.area,configuration=PILOTS[area];
@@ -232,10 +239,7 @@ function ResidentPageContent() {
 
     const [initialTime] = useState(() => new Date().toISOString());
     const [planningNow,setPlanningNow]=useState(initialTime);
-    const [departure, setDeparture] = useState<string | null>(() => {
-        const raw = searchParams.get('departure');
-        return raw && Number.isFinite(Date.parse(raw)) && Date.parse(raw) >= Date.now() - 900000 ? raw : null;
-    });
+    const [departure, setDeparture] = useState(() => readSharedDeparture(searchParams.get('departure')));
     const [entranceId, setEntranceId] = useState(searchParams.get('entrance') || '');
     const [sourceWalkingData, setWalkingData] = useState<WalkingData | null>(null);
     const [networkSnapshot, setNetworkSnapshot] = useState<string | null>(null);
@@ -259,13 +263,17 @@ function ResidentPageContent() {
         return value && COMMUNITY_ID.test(value) ? value.toLowerCase() : null;
     });
     const [communityVersion, setCommunityVersion] = useState(0);
-    const [showCommunity, setShowCommunity] = useState(false);
+    const sharedShortcut = searchParams.get('shortcut');
+    const shortcutId = sharedShortcut && COMMUNITY_ID.test(sharedShortcut) ? sharedShortcut.toLowerCase() : undefined;
+    const [showCommunity, setShowCommunity] = useState(Boolean(shortcutId));
     const [shortcutWalk, setShortcutWalk] = useState<CompletedWalk>();
     const [showNearby, setShowNearby] = useState(false);
     const [loadingDb, setLoadingDb] = useState(true);
     const [dataError, setDataError] = useState(false);
     const [reloadVersion, setReloadVersion] = useState(0);
 
+    const [shadeData, setShadeData] = useState<ShadeDataset>();
+    const shadeModel = useMemo(() => shadeData && solarModel(shadeData), [shadeData]);
     const [weather, setWeather] = useState<WalkingWeather | null>(null);
     const [warningFeed, setWarningFeed] = useState<WeatherWarnings | null>(null);
     const [chosenMode, setChosenMode] = useState<Mode | null>(initialWalk.mode);
@@ -276,7 +284,7 @@ function ResidentPageContent() {
     const [libraryMessage, setLibraryMessage] = useState<string | null>(initialLibrary.warning);
     const [walkSession, setWalkSession] = useState<WalkSession | null>(boot.draft);
     const [sessionFinished, setSessionFinished] = useState(false);
-    const [view, setView] = useState<'plan' | 'walk' | 'saved'>(walkSession && !initialWalk.fromLink ? 'walk' : 'plan');
+    const [view, setView] = useState<'plan' | 'walk' | 'saved'>(walkSession && !openingShared ? 'walk' : 'plan');
     const [returning, setReturning] = useState(searchParams.get('return') === '1');
     const [savingPack, setSavingPack] = useState(false);
     const [panelState, setPanelState] = useState<PanelState>('min');
@@ -290,11 +298,14 @@ function ResidentPageContent() {
     const [showReportHistory, setShowReportHistory] = useState(false);
     const [reportReceipts, setReportReceipts] = useState(() => readReportReceipts(area));
     const [pickingHazard, setPickingHazard] = useState(false);
+    const [reportEdgeId, setReportEdgeId] = useState<number | null>(null);
+    const [observedTime, setObservedTime] = useState('');
+    const [shadeChange, setShadeChange] = useState<ShadeChange | ''>('');
     const [reportAsset, setReportAsset] = useState<WalkingAsset | null>(null);
     const [reportPoint, setReportPoint] = useState<[number, number] | null>(null);
     const [reportLocated, setReportLocated] = useState(false);
     const [deviceHazards, setDeviceHazards] = useState(() => readDeviceHazards(area));
-    const [informationLayer, setInformationLayer] = useState<EnvironmentLayer | 'routes'>('routes');
+    const [informationLayer, setInformationLayer] = useState<EnvironmentLayer | 'routes'>(searchParams.get('layer') === 'shade' ? 'shade' : 'routes');
     const [selectedKind, setSelectedKind] = useState<HazardKind | null>(null);
     const [reportNotes, setReportNotes] = useState('');
     const [reportPhoto, setReportPhoto] = useState<string | null>(null);
@@ -371,6 +382,10 @@ function ResidentPageContent() {
             if (!cancelled) setWarningFeed(feed);
         }
 
+        let mappedContext: PilotContext | null = null;
+        let mapRevision = '';
+        const shadeRevision = (queue: MaintenanceDefect[]) => queue.filter(report => report.map_updated_at).map(report => `${report.id}:${report.map_updated_at}`).join(',');
+
         async function loadGraph() {
             try {
                 const [graphData, hazardData, reportData, walking,context] = await Promise.all([
@@ -379,6 +394,8 @@ function ResidentPageContent() {
                 if (cancelled) return;
                 const mapped = withMappedDetails(graphData.edges, { ...walking,
                     area_id: area, dataset_id: walking.dataset_id ?? graphData.source.dataset_id }, context);
+                mappedContext = context;
+                mapRevision = shadeRevision(reportData.reports);
                 setPilotData(context);
                 if(!initialOriginUsed.current){setUserCoords(graphData.source.origin?.coordinates??context.origin.coordinates);initialOriginUsed.current=true;}
                 setNodes(graphData.nodes);
@@ -403,7 +420,15 @@ function ResidentPageContent() {
                 const [live, queue] = await Promise.all([loadHazards(area), loadReports('all', area)]);
                 if (!cancelled) {
                     setHazards(previous => JSON.stringify(previous) === JSON.stringify(live.hazards) ? previous : live.hazards);
-                    setReports(queue.reports);
+                    setReports(previous => JSON.stringify(previous) === JSON.stringify(queue.reports) ? previous : queue.reports);
+                    const revision = shadeRevision(queue.reports);
+                    if (mappedContext && revision !== mapRevision) {
+                        const data = await loadWalkingData(area);
+                        if (!cancelled) {
+                            setWalkingData(withMappedDetails([], data, mappedContext).walking);
+                            mapRevision = revision;
+                        }
+                    }
                 }
             } catch { /* Keep the last received condition data. */ }
         }
@@ -423,18 +448,27 @@ function ResidentPageContent() {
     }, [reloadVersion,area]);
 
     useEffect(() => {
+        const controller = new AbortController();
+        fetch(sitePath(`/map-area/${area}-shade.json`), { signal: controller.signal }).then(response => {
+            if (!response.ok) throw new Error('Shade model unavailable');
+            return response.json() as Promise<ShadeDataset>;
+        }).then(data => { if (!controller.signal.aborted) setShadeData(data); }).catch(() => { /* The map keeps its mapped and checked conditions. */ });
+        return () => controller.abort();
+    }, [area]);
+
+    useEffect(() => {
         if (IS_PAGES_PREVIEW) return;
         let cancelled = false;
         async function refresh() {
             try {
-                const { routes } = await loadCommunityRoutes(area, undefined, communityId ?? undefined);
+                const { routes } = await loadCommunityRoutes(area, undefined, communityId ?? shortcutId);
                 if (!cancelled) setCommunityRoutes(previous => JSON.stringify(previous) === JSON.stringify(routes) ? previous : routes);
             } catch { /* A temporary service outage leaves the most recent list open. */ }
         }
         void refresh();
         const timer = window.setInterval(refresh, 30000);
         return () => { cancelled = true; window.clearInterval(timer); };
-    }, [area, communityId, communityVersion]);
+    }, [area, communityId, communityVersion, shortcutId]);
 
     /* ---------- Routing ---------- */
     const planningTime = departure ?? planningNow;
@@ -442,8 +476,8 @@ function ResidentPageContent() {
     const nearbyWeatherWarning = warningFeed?.warnings.some(warning => warning.mentions_area && warning.valid_to > planningNow);
     const fixedIds = useMemo(() => new Set(reports.filter(report => report.status === 'fixed').map(report => String(report.id))), [reports]);
     const walkingData = useMemo(() => sourceWalkingData
-        ? withPersonalUpdates(sourceWalkingData, library.updates.filter(update => !update.report_id || !fixedIds.has(update.report_id)), planningTime) : null,
-        [sourceWalkingData, library.updates, fixedIds, planningTime]);
+        ? withPersonalUpdates(sourceWalkingData, library.updates.filter(update => !update.report_id || !fixedIds.has(update.report_id)), planningNow) : null,
+        [sourceWalkingData, library.updates, fixedIds, planningNow]);
     const slot: TimeSlot = slotForHour(malaysiaHour(planningTime));
     const isNight = slot === 'night';
     const graph = useMemo(() => buildGraph(nodes, edges), [nodes, edges]);
@@ -464,12 +498,14 @@ function ResidentPageContent() {
         asset.edge_id !== null ? [asset.parent_id ?? asset.id] : []) ?? []), [walkingData]);
     const forecast = forecastAt(weather, planningTime);
     const toolRequest = useMemo(() => ({ origin: userCoords, profile, needs, departure_at: planningTime }), [userCoords, profile, needs, planningTime]);
-    const planningSnapshot=useMemo(()=>walkingData&&nodes.length?{nodes,edges,walking:walkingData,hazards}:null,[nodes,edges,walkingData,hazards]);
+    const planningSnapshot = useMemo(() => walkingData && nodes.length ? { nodes, edges, walking: walkingData, hazards, shade: shadeData } : null,
+        [nodes, edges, walkingData, hazards, shadeData]);
     const selectedCommunity = communityRoutes.find(route => route.id === communityId);
-    const journeySearch = usePlannerResult<JourneyPlan>(planningSnapshot, step !== 'route' ? null : communityId
+    const journeyCommand: SearchCommand | null = step !== 'route' ? null : communityId
         ? selectedCommunity ? { type: 'community', input: toolRequest, community: selectedCommunity } : null
         : returning ? { type: 'return', input: toolRequest, feels_like: forecast?.feels_like_c }
-        : destination ? { type: 'journey', input: { ...toolRequest, destination, entrance_id: entranceId || undefined }, feels_like: forecast?.feels_like_c } : null);
+        : destination ? { type: 'journey', input: { ...toolRequest, destination, entrance_id: entranceId || undefined }, feels_like: forecast?.feels_like_c } : null;
+    const journeySearch = usePlannerResult<JourneyPlan>(planningSnapshot, journeyCommand);
     const plan=journeySearch.result;
     const matchingPlaces = useMemo(() => searchResidentPlaces(places, placeQuery.trim().split(',')[0], pilotData?.featured_ids ?? [], connectedPlaces),
         [places, placeQuery, pilotData, connectedPlaces]);
@@ -503,9 +539,12 @@ function ResidentPageContent() {
         activeRoute.entrance.id, activeRoute.arrival_at).step_free;
     const reportEdge = useMemo(() => {
         if (!reportPoint || !pointInPilot(reportPoint, area)) return null;
+        if (reportEdgeId !== null) return graph.edges.get(reportEdgeId) ?? null;
         const near = nearestEdge(graph, ...reportPoint);
-        return near && near.distance_m <= 150 ? edges.find(edge => edge.id === near.edge_id) ?? null : null;
-    }, [reportPoint, graph, edges, area]);
+        return near && near.distance_m <= (selectedKind === 'shade_correction' ? 30 : 150) ? graph.edges.get(near.edge_id) ?? null : null;
+    }, [reportPoint, reportEdgeId, graph, area, selectedKind]);
+    const observedAt = fromMalaysiaInput(observedTime);
+    const shadeReportReady = Boolean(reportEdge && !reportAsset && shadeChange && observedAt);
     const localReports = useMemo(() => deviceHazards.filter(report => report.dataset === sourceWalkingData?.dataset_id),
         [deviceHazards, sourceWalkingData?.dataset_id]);
     const mapReports = useMemo(() => [...reports.filter(report => report.status !== 'fixed'), ...localReports], [reports, localReports]);
@@ -513,6 +552,26 @@ function ResidentPageContent() {
         .map(asset => ({ asset, distance: metres([asset.lng, asset.lat], [reportPoint[1], reportPoint[0]]) }))
         .filter(item => item.distance <= 100).sort((a, b) => a.distance - b.distance)
         .slice(0, 12).map(item => item.asset) : [], [reportPoint, sourceWalkingData, selectedKind]);
+    const records = walkingData?.verifications;
+    const describeSpot = useCallback((asset: WalkingAsset) => spotDetails(asset, planningTime, records ?? [], language, shadeModel, activeRoute),
+        [planningTime, records, language, shadeModel, activeRoute]);
+    const openShadeReport = useCallback((id: number, point?: [number, number]) => {
+        const edge = graph.edges.get(id);
+        if (!edge || edge.geometry.length < 2) return;
+        const [lng, lat] = point ? projectPoint(edge.geometry, [point[1], point[0]]).point : pointAt(edge.geometry, .5);
+        setReportEdgeId(id);
+        setReportPoint([lat, lng]);
+        setReportAsset(null);
+        setSelectedKind('shade_correction');
+        setShadeChange('');
+        setObservedTime(malaysiaInput(new Date().toISOString()));
+        setReportNotes('');
+        setReportPhoto(null);
+        setAutoNote(null);
+        setReportMsg(null);
+        setShowReportHistory(false);
+        setShowReportModal(true);
+    }, [graph]);
     const activeWalkReports = useMemo(() => walkSession ? checkedRouteReports(walkSession.pack.route, reports) : [], [walkSession, reports]);
 
     const mapRoutes = useMemo(
@@ -614,6 +673,8 @@ function ResidentPageContent() {
 
     async function startWalk() {
         if (walkSession && !sessionFinished) {
+            const sessionArea = walkSession.pack.area_id ?? 'elmina';
+            if (sessionArea !== area) { router.replace(`/resident?area=${sessionArea}`); return; }
             setView('walk');
             setPanelMinimized(false);
             setLibraryMessage('Your current walk is still in progress. Finish it before starting another.');
@@ -627,7 +688,8 @@ function ResidentPageContent() {
             const input = { ...toolRequest, departure_at: now };
             fresh = await journeySearch.run<JourneyPlan>(selectedCommunity
                 ? { type: 'community', input, community: selectedCommunity }
-                : { type: returning ? 'return' : 'journey', input: { ...input, ...(destination ? { destination } : {}), entrance_id: entranceId || undefined } });
+                : { type: returning ? 'return' : 'journey', input: { ...input, ...(destination ? { destination } : {}), entrance_id: entranceId || undefined },
+                    feels_like: forecastAt(weather, now)?.feels_like_c });
         }
         catch{setLibraryMessage('The current route could not be checked. Please refresh and try again.');return;}finally{setStartingWalk(false);}
         const route = fresh?.routes[shownMode];
@@ -705,7 +767,8 @@ function ResidentPageContent() {
         speak(
             `${activeRoute.return_walk ? 'Return to your starting point' : `To ${activeRoute.destination.name}`}. ${t(routeLabel(shownMode, isNight, fastest))} route. About ${minutesOf(activeRoute)} minutes, ` +
             `${Math.round(activeRoute.length_m)} metres. ${activeRoute.verified_rest_stops} verified rest stops. ` +
-            `${Math.round(activeRoute.uncovered_m)} metres uncovered, estimated. ${activeRoute.unverified_crossings} crossings need checks. ` +
+            (activeRoute.sun_exposure && !isNight ? `About ${Math.round(activeRoute.sun_exposure.sun_s / 60)} minutes in direct sun, ${Math.ceil(activeRoute.sun_exposure.unknown_s / 60)} minutes with unknown shade. ` : '') +
+            `${activeRoute.unverified_crossings} crossings need checks. ` +
             `Arrival at ${activeRoute.entrance.name}. ${activeRoute.suitability === 'green' ? 'This route meets your needs and current checks.' : 'This route needs confirmation.'}`,
             true,
         );
@@ -715,7 +778,7 @@ function ResidentPageContent() {
     const walkMin = activeRoute ? minutesOf(activeRoute) : null;
     const shareMessage =
         `${activeRoute?.return_walk ? 'I am taking a return walk' : `I'm walking to ${activeRoute?.destination.name ?? currentDest.name}`} on the ${t(routeLabel(shownMode, isNight, fastest)).toLowerCase()} route` +
-        `${walkMin ? `, about ${walkMin} minutes` : ''}. Here is my route:`;
+        `${walkMin ? `, about ${walkMin} minutes` : ''}. Departure ${malaysiaTimeLabel(activeRoute?.departure_at ?? planningTime, language, true)} MYT.`;
 
     function openShare() {
         const captured = view === 'walk' ? walkSession?.pack : undefined;
@@ -723,13 +786,14 @@ function ResidentPageContent() {
         const sharedRoute = captured?.route ?? activeRoute;
         const params = new URLSearchParams({
             area,
-            startLat: origin[0].toFixed(5),
-            startLng: origin[1].toFixed(5),
+            startLat: String(origin[0]),
+            startLng: String(origin[1]),
             destId: sharedRoute?.destination.external_id || sharedRoute?.destination.id || destId,
             mode: shownMode,
             profile: captured?.profile ?? profile,
             needs: JSON.stringify(captured?.needs ?? needs),
             departure: sharedRoute?.departure_at ?? planningTime,
+            ...(informationLayer === 'shade' ? { layer: 'shade' } : {}),
             ...(sharedRoute?.community_id ? { community: sharedRoute.community_id } : {}),
             ...(sharedRoute?.return_walk ? { return: '1' } : {}),
             ...(sharedRoute && !sharedRoute.return_walk ? { entrance: sharedRoute.entrance.id } : {}),
@@ -739,6 +803,12 @@ function ResidentPageContent() {
         setShareNote(null);
         setShowShare(true);
         buzz();
+    }
+
+    async function shareShortcut(route: CommunityRoute) {
+        const url = new URL(window.location.pathname, window.location.origin);
+        url.search = new URLSearchParams({ area, shortcut: route.id, departure: planningTime }).toString();
+        return copyText(url.toString());
     }
 
     async function nativeShare() {
@@ -760,6 +830,7 @@ function ResidentPageContent() {
 
     /* ---------- Reporting a problem ---------- */
     function openReport() {
+        setReportEdgeId(null);
         setReportAsset(null);
         setSelectedKind(null);
         setReportPoint(livePoint ?? mapFocus ?? userCoords);
@@ -771,6 +842,7 @@ function ResidentPageContent() {
     }
 
     function openAssetReport(asset: WalkingAsset) {
+        setReportEdgeId(null);
         if (asset.source === 'gtfs') return;
         setReportAsset(asset);
         setReportPoint([asset.lat, asset.lng]);
@@ -781,6 +853,7 @@ function ResidentPageContent() {
     }
 
     function chooseReportPoint(lat: number, lng: number) {
+        setReportEdgeId(null);
         setReportAsset(null);
         setReportPoint([lat, lng]);
         setReportMsg(null);
@@ -795,6 +868,7 @@ function ResidentPageContent() {
         }
         setReportLocated(true);
         navigator.geolocation.getCurrentPosition(position => {
+            setReportEdgeId(null);
             setReportAsset(null);
             setReportPoint([position.coords.latitude, position.coords.longitude]);
             setReportMsg(null);
@@ -822,16 +896,32 @@ function ResidentPageContent() {
         setDeviceHazards(next);
     }
 
+    function chooseReportKind(kind: HazardKind) {
+        setSelectedKind(kind);
+        if (kind === 'shade_correction') {
+            setReportAsset(null);
+            if (!observedTime) setObservedTime(malaysiaInput(new Date().toISOString()));
+        }
+        buzz();
+    }
+
     async function submitCapexDefect() {
         if (!selectedKind || (!reportEdge && !reportAsset) || !reportPoint || isSubmittingReport
-            || (selectedKind === 'lift_out' && reportAsset?.kind !== 'entrance') || (selectedKind === 'details_outdated' && !reportAsset)) return;
+            || (selectedKind === 'lift_out' && reportAsset?.kind !== 'entrance') || (selectedKind === 'details_outdated' && !reportAsset)
+            || (selectedKind === 'shade_correction' && !shadeReportReady)) return;
+        if (selectedKind === 'shade_correction' && observedAt && Date.parse(observedAt) > Date.now() + 60000) {
+            setReportMsg(t('Choose an observation time in the past.'));
+            return;
+        }
         setReportMsg(null);
         setIsSubmittingReport(true);
         const [lat, lng] = reportPoint;
+        const observation = selectedKind === 'shade_correction' && shadeChange && observedAt
+            ? { shade_change: shadeChange, observed_at: observedAt } : {};
         try {
             if (IS_PAGES_PREVIEW) {
                 updateDeviceHazards([{ id: crypto.randomUUID(), lat, lng, category: issueLabel[selectedKind], kind: selectedKind,
-                    description: reportNotes.trim(), created_at: new Date().toISOString(),
+                    description: reportNotes.trim(), ...observation, created_at: new Date().toISOString(),
                     location: reportAsset?.name ?? reportEdge?.name ?? 'Mapped footpath', dataset: sourceWalkingData?.dataset_id,
                     ...(reportPhoto ? { photo: reportPhoto } : {}) },
                 ...deviceHazards]);
@@ -839,7 +929,7 @@ function ResidentPageContent() {
                 speak('Your report was saved on this device.');
             } else {
                 const { hazard, report } = await submitReport({
-                    area_id: area, edge_id: reportAsset ? undefined : reportEdge?.id, asset_id: reportAsset?.id, lat, lng, kind: selectedKind, description: reportNotes,
+                    area_id: area, edge_id: reportAsset ? undefined : reportEdge?.id, asset_id: reportAsset?.id, lat, lng, kind: selectedKind, description: reportNotes, ...observation,
                 });
                 setHazards(previous => [...previous, hazard]);
                 setReports(previous => [report, ...previous]);
@@ -859,6 +949,9 @@ function ResidentPageContent() {
             setAutoNote(null);
             setReportPhoto(null);
             setReportPoint(null);
+            setReportEdgeId(null);
+            setObservedTime('');
+            setShadeChange('');
             setReportAsset(null);
             setSelectedKind(null);
             setShowReportModal(false);
@@ -919,6 +1012,14 @@ function ResidentPageContent() {
         setView('plan');
     }
 
+    function changeDeparture(value: string) {
+        setDeparture(value);
+        if (step === 'route') setInformationLayer('shade');
+    }
+
+    const departureControl = <DepartureControl language={language} departure={planningTime} now={!departure} onChange={changeDeparture}
+        onNow={() => { setDeparture(null); setPlanningNow(new Date().toISOString()); }} forecast={forecast} />;
+
     const planningControls = <div className="space-y-3">
         <div className="tg-quick-needs" role="group" aria-label={t('Walking needs')}>
             <button type="button" className="tg-card" aria-pressed={needs.step_free || profile === 'wheelchair'} disabled={profile === 'wheelchair'}
@@ -931,13 +1032,12 @@ function ResidentPageContent() {
             </button>
         </div>
         <WalkingRequirements language={language} needs={needs} profile={profile} onChange={value => { setNeeds(normaliseNeeds(value)); setChosenMode(null); }} />
-        <DepartureControl language={language} departure={planningTime} onChange={value => { setDeparture(value); setChosenMode(null); }} onNow={() => { setDeparture(null);setPlanningNow(new Date().toISOString()); setReloadVersion(v => v + 1); }} forecast={forecast} />
     </div>;
 
     const communityButton = <button type="button" className="tg-btn" disabled={!walkingData?.dataset_id}
         onClick={() => { setShortcutWalk(undefined); setShowCommunity(true); }}><RouteIcon size={18} aria-hidden />{t('Community routes')}</button>;
     const localPlaces = <PlaceDiscovery snapshot={planningSnapshot} request={toolRequest} budget={needs.budget_min}
-        onChoose={selectSearchResult} onReport={openAssetReport} />;
+        onChoose={selectSearchResult} onReport={openAssetReport} language={language} />;
     const quickUpdate = <QuickConditionUpdate area={area} dataset={walkingData?.dataset_id} edges={edges.filter(e => activeRoute?.edge_ids.includes(e.id))} facilities={walkingData?.assets ?? []} onSave={saveUpdate} onShare={shareUpdate} />;
     const routeReady = Boolean(activeRoute && !loadingDb && !journeySearch.pending);
     const choosingRoute = view === 'plan' && step === 'route';
@@ -1023,9 +1123,14 @@ function ResidentPageContent() {
                     activeRouteId={activeRoute?.mode ?? ''}
                     reports={mapReports}
                     assets={mapAssets}
+                    describeAsset={describeSpot}
+                    solar={shadeModel}
+                    shadeAt={planningTime}
+                    routeShade={view === 'plan' ? activeRoute?.sun_exposure?.stretches : undefined}
+                    onShadeReport={openShadeReport}
                     startCoords={view === 'walk' && walkSession ? walkSession.pack.origin : selectedCommunity?.path?.coordinates[0] ?? userCoords}
                     endCoords={activeRoute ? [activeRoute.entrance.lat, activeRoute.entrance.lng] : step === 'route' && destination && !returning && !communityId ? currentDest.coords : undefined}
-                    endDetail={activeRoute?.entrance.name}
+                    endDetail={activeRoute ? [activeRoute.entrance.name, ...describeSpot(activeRoute.entrance)].join(' · ') : undefined}
                     startLabel={t(usingGPS ? 'You' : 'Start')}
                     routeRoof={plannedRoof}
                     reduceMotion={prefs.reduceMotion}
@@ -1063,6 +1168,7 @@ function ResidentPageContent() {
                             <div className="tg-route-hero" aria-live="polite">
                                 <div><strong>{minutesOf(activeRoute)} min</strong><span>{Math.round(activeRoute.length_m)} m</span></div>
                                 <RouteCoverage route={activeRoute} language={language} />
+                                <RouteSun route={activeRoute} language={language} compact />
                             </div>
                             <button className="tg-btn tg-btn-primary" onClick={() => void startWalk()} disabled={!routeReady || startingWalk}>
                                 <Navigation size={20} aria-hidden />{t(startingWalk ? 'Checking your route…' : 'Start walk')}
@@ -1092,6 +1198,7 @@ function ResidentPageContent() {
                                 {suggestedPlaces.map(place => <button key={place.id} type="button" onClick={() => selectSearchResult(place)}><MapPin size={17} aria-hidden />{residentPlaceName(place)}</button>)}
                             </div>}
                             {planningControls}
+                            {departureControl}
                             {localPlaces}
                             {communityButton}
                             {pilotData && area !== 'elmina' && <TransitNearby context={pilotData} assets={walkingData?.assets ?? []} origin={transitCentre} at={planningTime}
@@ -1126,10 +1233,19 @@ function ResidentPageContent() {
                                     setCommunityId(null); setStep('where'); setReturning(false); setChosenMode(null); setPanelMinimized(true);
                                 }}><X size={20} aria-hidden /></button>
                             </div>
+                            {departureControl}
                             {loadingDb || journeySearch.pending ? <p className="tg-note" role="status">{t(loadingDb ? 'Loading footpaths…' : 'Finding walking routes…')}</p>
                                 : plan && activeRoute ? <>
                                     <RouteComparison routes={plan.routes} modes={visibleModes} chosen={shownMode} fastest={fastest} night={isNight} language={language}
                                         onChoose={mode => { chooseMode(mode); setMapFocus(undefined); }} />
+                                    <div className="flex flex-wrap gap-x-4">
+                                        {shadeModel && <button type="button" className="tg-text-action" aria-pressed={informationLayer === 'shade'}
+                                            onClick={() => setInformationLayer(informationLayer === 'shade' ? 'routes' : 'shade')}><Sun size={18} aria-hidden />{t('Show shade on map')}</button>}
+                                        <button type="button" className="tg-text-action" onClick={openShare}><Share2 size={18} aria-hidden />{t('Share plan')}</button>
+                                    </div>
+                                    {planningSnapshot?.shade && journeyCommand && !!activeRoute.sun_exposure?.daylight_s && <DepartureOptions
+                                        snapshot={planningSnapshot} plan={journeyCommand} route={activeRoute} weather={weather} language={language}
+                                        onChoose={time => { if (!returning && !communityId) setEntranceId(activeRoute.entrance.id); setChosenMode(shownMode); changeDeparture(time); }} />}
                                     <RouteChecks route={activeRoute} language={language} />
                                 </> : <div className="tg-note tg-warnbox" role="status">
                                     <strong>{t('No matching route')}</strong>
@@ -1141,7 +1257,8 @@ function ResidentPageContent() {
                                     <div><p className="tg-label">{t('Arrival entrance')}</p><strong>{activeRoute.entrance.name}</strong>
                                         <p className="tg-small">{arrivalCheck?.status === 'verified'
                                             ? (arrivalCheck.value === true ? t('Step-free access checked') : t('Stairs or barriers recorded'))
-                                            : t('Access needs checking')}</p></div></div>}
+                                            : t('Access needs checking')}</p>
+                                        <p className="tg-small">{describeSpot(activeRoute.entrance).slice(0, 2).join(' · ')}</p></div></div>}
                                 {entrances.length > 1 && <label className="tg-label">{t('Choose an entrance')}
                                     <select className="tg-input" value={entranceId} onChange={event => { setEntranceId(event.target.value); setChosenMode(null); }}>
                                         <option value="">{t('Best available access point')}</option>
@@ -1155,11 +1272,10 @@ function ResidentPageContent() {
                                 <div className="tg-stack mt-3">
                                     {activeRoute && <>
                                         <ComfortBreakdown route={activeRoute} edges={edges} records={walkingData?.verifications ?? []} night={isNight} />
-                                        <WalkTimeline route={activeRoute} edges={edges} records={walkingData?.verifications ?? []} language={language} onFocus={focusWalkPoint} />
+                                        <WalkTimeline route={activeRoute} edges={edges} records={walkingData?.verifications ?? []} language={language} onFocus={focusWalkPoint} onShadeReport={openShadeReport} />
                                         <RouteDetails route={activeRoute} />
                                         <div className="grid grid-cols-2 gap-2">
                                             <button className="tg-btn" disabled={savingPack} onClick={() => void savePack()}><Bookmark size={18} aria-hidden />{savingPack ? 'Preparing…' : 'Save offline'}</button>
-                                            <button className="tg-btn" onClick={openShare}><Share2 size={18} aria-hidden />Share plan</button>
                                             <button className="tg-btn" onClick={() => { if (walkingData) downloadPack(createWalkPack(activeRoute, profile, needs, userCoords, edges, walkingData, undefined, networkSnapshot)); }}>Download walk pack</button>
                                             {canSpeak && <button className="tg-btn" onClick={readRouteAloud}><Volume2 size={18} aria-hidden />Read aloud</button>}
                                         </div>
@@ -1197,6 +1313,8 @@ function ResidentPageContent() {
                 {([['plan', 'Map', Compass], ['walk', 'Walk', Navigation], ['saved', 'Saved', Bookmark]] as const)
                     .filter(([id]) => id !== 'walk' || walkSession).map(([id, label, Icon]) =>
                     <button type="button" key={id} aria-current={view === id ? 'page' : undefined} onClick={() => {
+                        const sessionArea = walkSession?.pack.area_id ?? 'elmina';
+                        if (id === 'walk' && sessionArea !== area) { router.replace(`/resident?area=${sessionArea}`); return; }
                         setView(id);
                         setSearchOpen(false);
                         setPanelMinimized(id !== 'walk' || !sessionFinished);
@@ -1211,14 +1329,14 @@ function ResidentPageContent() {
             {showCommunity && walkingData?.dataset_id && <Sheet title={t(shortcutWalk ? 'Share a local shortcut' : 'Community routes')} language={language}
                 onClose={() => { setShowCommunity(false); setShortcutWalk(undefined); }}>
                 <CommunityRoutes area={area} dataset={walkingData.dataset_id} graph={{ nodes, edges }} walks={library.history}
-                    startPoints={startPoints} routes={communityRoutes} now={planningNow} onPlan={selectCommunity} initialWalk={shortcutWalk} language={language}
+                    startPoints={startPoints} routes={communityRoutes} now={planningNow} onPlan={selectCommunity} initialWalk={shortcutWalk} initialRouteId={shortcutId} onShare={shareShortcut} language={language}
                     onShared={() => setCommunityVersion(value => value + 1)} />
             </Sheet>}
 
             {showNearby && walkingData && <Sheet title={t('Nearby facilities')} onClose={() => setShowNearby(false)} language={language}>
                 <NearbyFacilities assets={walkingData.assets} centre={pinCentre} language={language}
                     onFocus={asset => { setShowNearby(false); setPanelMinimized(true); focusWalkPoint([asset.lat, asset.lng]); }}
-                    onPlan={asset => { setShowNearby(false); selectSearchResult(asset); }} />
+                    describe={describeSpot} onPlan={asset => { setShowNearby(false); selectSearchResult(asset); }} />
             </Sheet>}
 
             {showStartPicker && (
@@ -1363,7 +1481,7 @@ function ResidentPageContent() {
                             <div className="tg-report-categories tg-report-quick">
                                 {HAZARD_OPTIONS.slice(0, 3).map(({ kind, Icon }) => <label key={kind}>
                                     <input className="sr-only" type="radio" name="report-kind" value={kind} checked={selectedKind === kind}
-                                        onChange={() => { setSelectedKind(kind); buzz(); }} />
+                                        onChange={() => chooseReportKind(kind)} />
                                     <span><Icon size={20} aria-hidden />{t(issueLabel[kind])}</span>
                                 </label>)}
                             </div>
@@ -1372,7 +1490,7 @@ function ResidentPageContent() {
                                 <div className="tg-report-categories">
                                     {HAZARD_OPTIONS.slice(3).map(({ kind, Icon }) => <label key={kind}>
                                         <input className="sr-only" type="radio" name="report-kind" value={kind} checked={selectedKind === kind}
-                                            onChange={() => { setSelectedKind(kind); buzz(); }} />
+                                            onChange={() => chooseReportKind(kind)} />
                                         <span><Icon size={19} aria-hidden />{t(issueLabel[kind])}</span>
                                     </label>)}
                                 </div>
@@ -1384,7 +1502,7 @@ function ResidentPageContent() {
                                 {reportAsset ? reportAsset.name : reportPoint && reportEdge ? reportEdge.name || t('On the map')
                                     : reportPoint ? t('Choose a point near a mapped path.') : t('Choose where you saw the problem.')}
                             </p>
-                            {!!reportPoint && (selectedKind === 'lift_out' || selectedKind === 'details_outdated' || reportAsset) && <label className="tg-label">
+                            {!!reportPoint && selectedKind !== 'shade_correction' && (selectedKind === 'lift_out' || selectedKind === 'details_outdated' || reportAsset) && <label className="tg-label">
                                 {t(selectedKind === 'lift_out' ? 'Choose the affected entrance' : 'What is affected?')}
                                 <select className="tg-input" value={reportAsset?.id ?? ''} onChange={event => {
                                     const asset = reportAssets.find(item => item.id === event.target.value);
@@ -1401,6 +1519,18 @@ function ResidentPageContent() {
                                 <button type="button" className="tg-btn" disabled={reportLocated} onClick={locateReport}>{t(reportLocated ? 'Finding…' : 'My location')}</button>
                             </div>
                         </div>
+                        {selectedKind === 'shade_correction' && <div className="tg-stack">
+                            <label className="tg-label">{t('What changed?')}
+                                <select className="tg-input" required value={shadeChange} onChange={event => setShadeChange(event.target.value as ShadeChange | '')}>
+                                    <option value="" disabled>{t('What changed?')}</option>
+                                    {SHADE_CHANGES.map(change => <option key={change} value={change}>{t(shadeChangeLabel[change])}</option>)}
+                                </select>
+                            </label>
+                            <label className="tg-label">{t('Observed at (Malaysia time)')}
+                                <input className="tg-input" type="datetime-local" required value={observedTime}
+                                    onChange={event => setObservedTime(event.target.value)} />
+                            </label>
+                        </div>}
                         <details className="tg-details">
                             <summary>{t('More details (optional)')}</summary>
                             <div className="tg-stack">
@@ -1413,7 +1543,8 @@ function ResidentPageContent() {
                         </details>
                         {reportMsg && <p className="tg-note" role="status">{reportMsg}</p>}
                         <button type="submit" className="tg-btn tg-btn-primary" disabled={loadingDb || isSubmittingReport || !selectedKind || (!reportEdge && !reportAsset)
-                            || (selectedKind === 'lift_out' && reportAsset?.kind !== 'entrance') || (selectedKind === 'details_outdated' && !reportAsset)}>
+                            || (selectedKind === 'lift_out' && reportAsset?.kind !== 'entrance') || (selectedKind === 'details_outdated' && !reportAsset)
+                            || (selectedKind === 'shade_correction' && !shadeReportReady)}>
                             <Send size={18} aria-hidden />{t(isSubmittingReport ? 'Saving…' : IS_PAGES_PREVIEW ? 'Save report' : 'Submit report')}
                         </button>
                     </form>

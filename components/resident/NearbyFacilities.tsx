@@ -6,8 +6,9 @@ import { residentText, type ResidentLabel, type ResidentLanguage } from '@/lib/r
 import { nearestFacilities, residentPlaceName, type NearbyFacility } from '@/lib/resident-walking';
 import type { WalkingAsset } from '@/lib/walking';
 
-export default function NearbyFacilities({ assets, centre, language, onFocus, onPlan }: {
+export default function NearbyFacilities({ assets, centre, language, onFocus, onPlan, describe }: {
     assets: WalkingAsset[]; centre: [number, number]; language: ResidentLanguage;
+    describe?: (asset: WalkingAsset) => string[];
     onFocus: (asset: WalkingAsset) => void; onPlan: (asset: WalkingAsset) => void;
 }) {
     const t = (label: ResidentLabel) => residentText(language, label);
@@ -24,6 +25,7 @@ export default function NearbyFacilities({ assets, centre, language, onFocus, on
             {list.map(({ asset, distance }) => <li key={asset.id}>
                 <strong>{residentPlaceName(asset)}</strong>
                 <p className="tg-small">{Math.round(distance)} {t('m away on the map')}</p>
+                {describe && <p className="tg-small">{describe(asset).join(' · ')}</p>}
                 <div className="tg-nearby-actions">
                     <button type="button" className="tg-text-action" onClick={() => onFocus(asset)}><MapPin size={17} aria-hidden />{t('Show on map')}</button>
                     <button type="button" className="tg-text-action" onClick={() => onPlan(asset)}>{t('Plan a walk')}</button>

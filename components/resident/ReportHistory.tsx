@@ -4,11 +4,12 @@ import { useState } from 'react';
 import { Check, Circle, ClipboardList, Plus } from 'lucide-react';
 import { residentText, type ResidentLanguage, type ResidentLabel } from '@/lib/resident-language';
 import type { HazardKind } from '@/lib/routing';
+import { shadeChangeLabel, type ShadeChange } from '@/lib/shade-corrections';
 import type { MaintenanceDefect } from '@/lib/types';
 
 export const issueLabel: Record<HazardKind, ResidentLabel> = {
     blocked: 'Blocked path', lift_out: 'Lift out', broken_surface: 'Broken pavement', light_out: 'Broken light',
-    no_ramp: 'Missing kerb ramp', no_shade: 'Missing shade', details_outdated: 'Incorrect place details',
+    shade_correction: 'Shade map correction', no_ramp: 'Missing kerb ramp', no_shade: 'Missing shade', details_outdated: 'Incorrect place details',
 };
 
 export interface DeviceReport {
@@ -18,6 +19,8 @@ export interface DeviceReport {
     location: string;
     created_at?: string;
     kind?: string;
+    observed_at?: string;
+    shade_change?: ShadeChange;
     photo?: string;
 }
 
@@ -25,6 +28,7 @@ function ReportTimeline({ report, language }: { report: MaintenanceDefect; langu
     const stages: { title: ResidentLabel; date?: string | null; done: boolean }[] = [
         { title: 'Reported', date: report.created_at, done: true },
         { title: 'Checked', date: report.checked_at, done: Boolean(report.checked_at) },
+        ...(report.kind === 'shade_correction' && !report.dismissed_at ? [{ title: 'Map updated' as const, date: report.map_updated_at, done: Boolean(report.map_updated_at) }] : []),
         report.dismissed_at ? { title: 'Dismissed', date: report.dismissed_at, done: true }
             : { title: 'Fixed', date: report.fixed_at, done: report.status === 'fixed' },
     ];
@@ -64,6 +68,8 @@ export default function ReportHistory({ reports, mine, deviceReports, preview, l
                     {typeof photo === 'string' && <img className="tg-report-photo" src={photo} alt={t('Photo (optional)')} />}
                     <strong>{label}</strong>
                     <p>{'location' in report ? report.location : report.location_name}</p>
+                    {report.shade_change && <p className="tg-small">{t(shadeChangeLabel[report.shade_change])}</p>}
+                    {report.observed_at && <p className="tg-small">{t('Observed')} <time dateTime={report.observed_at}>{dateLabel(report.observed_at, language)}</time></p>}
                     {report.description && <p className="tg-small">{report.description}</p>}
                     {'location' in report ? <>
                         <p className="tg-small">{t('Saved on this device')}{report.created_at && ` · ${dateLabel(report.created_at, language)}`}</p>

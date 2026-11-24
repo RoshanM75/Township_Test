@@ -2,6 +2,9 @@ import type { PathEdge } from './routing.ts';
 import { slotForHour } from './routing.ts';
 import { evidenceFor, malaysiaHour } from './verification.ts';
 import type { VerificationRecord } from './walking.ts';
+import { pathShade } from './route-shade.ts';
+import type { SolarModel } from './solar-shade.ts';
+import { pointAt } from './walking-geometry.ts';
 
 export type EnvironmentLayer = 'paths' | 'shade' | 'cover' | 'lighting' | 'observations';
 export type EnvironmentSource = 'checked' | 'reported' | 'mapped' | 'modelled' | 'expired' | 'unknown';
@@ -26,7 +29,7 @@ function conditionLabel(field: string, value: unknown) {
 
 /** Display information only. Layer colours never change route feasibility or
  * turn missing information into a positive accessibility/safety assessment. */
-export function environmentSegments(edges: PathEdge[], records: VerificationRecord[], instant: string, layer: EnvironmentLayer): EnvironmentSegment[] {
+export function environmentSegments(edges: PathEdge[], records: VerificationRecord[], instant: string, layer: EnvironmentLayer, solar?: SolarModel): EnvironmentSegment[] {
     const grouped = new Map<string, VerificationRecord[]>();
     for (const record of records) {
         const key = `${record.target_type}:${record.target_id}`;
@@ -34,11 +37,21 @@ export function environmentSegments(edges: PathEdge[], records: VerificationReco
         grouped.get(key)!.push(record);
     }
     const slot = slotForHour(malaysiaHour(instant));
+    const time = Date.parse(instant);
     return edges.filter(edge => edge.pedestrian_access !== false && edge.kind !== 'street').map<EnvironmentSegment>(edge => {
         const base = { id: edge.id, name: edge.name || `Footpath ${edge.id}`, geometry: edge.geometry };
         if (layer === 'paths') return { ...base, value: true, source: 'mapped', detail: 'Mapped pedestrian path; physical conditions need checking.' };
         const target = edge.is_crossing ? 'crossing' : 'path';
-        const evidence = evidenceFor(grouped.get(`${target}:${edge.id}`) ?? [], target, edge.id, instant);
+        const records = grouped.get(`${target}:${edge.id}`) ?? [];
+        if (layer === 'shade' && solar && edge.geometry.length >= 2) {
+            const { condition, source } = pathShade(edge, records, time, pointAt(edge.geometry, .5), solar);
+            const value = condition === 'sun' ? 0 : condition === 'shade' || condition === 'covered' ? 1 : null;
+            const detail = condition === 'unknown' ? 'Shade unknown at this time.' : condition === 'night' ? 'Outside daylight.'
+                : condition === 'covered' ? source === 'checked' ? 'Checked roof cover.' : 'Mapped roof cover.'
+                : `${source === 'checked' ? 'Field-checked' : 'Estimated'} ${condition === 'sun' ? 'direct sun' : 'shade'} at this time.`;
+            return { ...base, value, source: value === null ? 'unknown' : source, detail };
+        }
+        const evidence = evidenceFor(records, target, edge.id, instant);
         if (layer === 'observations') {
             const checked = Object.entries(evidence).filter(([, e]) => e.status === 'verified').map(([field, e]) => conditionLabel(field, e.value));
             return { ...base, value: checked.length ? true : null, source: checked.length ? 'checked' : 'unknown',

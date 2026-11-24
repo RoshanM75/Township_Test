@@ -3,6 +3,9 @@
 import { useMemo, useState } from 'react';
 import { usePlannerResult } from '@/lib/use-planner';
 import { metres } from '@/lib/walking-geometry';
+import { spotDetails } from '@/lib/shade-display';
+import { solarModel } from '@/lib/solar-shade';
+import type { ResidentLanguage } from '@/lib/resident-language';
 import { placeHours } from '@/lib/place-details';
 import { unavailableAssetIds } from '@/lib/report-status';
 import { evidenceFor } from '@/lib/verification';
@@ -15,6 +18,7 @@ interface Props {
     budget: number;
     onChoose: (asset: WalkingAsset) => void;
     onReport: (asset: WalkingAsset) => void;
+    language?: ResidentLanguage;
 }
 type PlaceResult = { destination: WalkingAsset; route: JourneyRoute | null; reasons: string[] };
 const categories = [
@@ -24,7 +28,7 @@ const categories = [
 ];
 const discoveryKind = ['destination', 'transit', 'toilet', 'water'];
 
-export default function PlaceDiscovery({ snapshot, request, budget, onChoose, onReport }: Props) {
+export default function PlaceDiscovery({ snapshot, request, budget, onChoose, onReport, language = 'en' }: Props) {
     const [category, setCategory] = useState('all');
     const [name, setName] = useState('');
     const [showUnavailable, setShowUnavailable] = useState(false);
@@ -74,7 +78,7 @@ export default function PlaceDiscovery({ snapshot, request, budget, onChoose, on
                 {typeof destination.properties.official_visit_note === 'string' && <p className="text-sm">{destination.properties.official_visit_note}</p>}
                 <p className="text-sm">{route ? `${Math.ceil(route.total_min)} min including rests · ${route.suitability === 'green'
                     ? 'Meets needs and current checks' : 'Conditions need checking'}` : reasons[0]}</p>
-                {route && snapshot && <PlaceArrival route={route} facilities={facilities} snapshot={snapshot} />}
+                {route && snapshot && <PlaceArrival route={route} facilities={facilities} snapshot={snapshot} language={language} />}
                 <div className="flex flex-wrap gap-x-3">
                     {typeof destination.properties.official_source === 'string' && <a className="inline-flex min-h-11 items-center text-sm font-bold underline"
                         href={destination.properties.official_source} target="_blank" rel="noreferrer">Directory source</a>}
@@ -92,7 +96,7 @@ export default function PlaceDiscovery({ snapshot, request, budget, onChoose, on
     </details>;
 }
 
-function PlaceArrival({ route, facilities, snapshot }: { route: JourneyRoute; facilities: WalkingAsset[]; snapshot: PlanningSnapshot }) {
+function PlaceArrival({ route, facilities, snapshot, language }: { route: JourneyRoute; facilities: WalkingAsset[]; snapshot: PlanningSnapshot; language: ResidentLanguage }) {
     const records = snapshot.walking.verifications;
     const checked = evidenceFor(records, route.entrance.kind === 'entrance' ? 'entrance' : 'facility', route.entrance.id, route.arrival_at);
     const mapped = route.entrance.properties.connection_model;
@@ -108,6 +112,7 @@ function PlaceArrival({ route, facilities, snapshot }: { route: JourneyRoute; fa
     const toilet = nearby.find(item => item.asset.kind === 'toilet');
     return <div className="space-y-1 text-sm text-slate-700">
         <p>{route.entrance.name} · {access}</p>
+        <p>{spotDetails(route.entrance, route.arrival_at, records, language, snapshot.shade && solarModel(snapshot.shade), route)[1]}</p>
         {checked.step_free?.status === 'verified' && <p>{checked.step_free.value === true ? 'Step-free access checked' : 'Steps or access barriers checked'}</p>}
         <p>Arrive about {time} MYT · {hours.open === null ? 'hours uncertain' : hours.open ? `open in ${hours.source.toLowerCase()}` : 'closed at arrival'}
             {route.destination.properties.official_closed_holidays === true && ' · public holiday closures apply'}</p>

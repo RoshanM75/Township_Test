@@ -408,6 +408,33 @@ test('Next.js APIs with real PostgreSQL/PostGIS', { timeout: 60000 }, async (t) 
             assert.equal((await review(targetsPath, { ...ownership, team: null }, 'PUT')).body.responsibility, null);
             assert.equal((await review(assignment, undefined, 'GET')).body.history.length, 2);
         });
+        await t.test('checking a shade correction updates the path and records the report timeline atomically', async () => {
+            const observed = new Date(Date.now() - 60000).toISOString();
+            const correction = { ...position, kind: 'shade_correction', observed_at: observed, shade_change: 'missing_tree' };
+            for (const invalid of [{ ...correction, edge_id: undefined }, { ...correction, shade_change: 'invalid' },
+                { ...correction, observed_at: new Date(Date.now() + 3600000).toISOString() }]) {
+                assert.equal((await post(invalid)).status, 400);
+            }
+            const created = await post(correction);
+            assert.equal(created.status, 201);
+            const { id } = created.body.report;
+            assert.equal(created.body.report.observed_at, observed);
+            assert.equal(created.body.report.map_updated_at, null);
+            assert.equal((await check(id)).status, 400);
+            const inspect = () => review(`/api/reports/${id}/check`, { team: 'Site team', note: 'Observed direct sun on this segment', shade_result: 'sun' });
+            const updated = await inspect();
+            assert.equal(updated.status, 200);
+            assert.ok(updated.body.report.checked_at && updated.body.report.map_updated_at);
+            assert.equal((await inspect()).status, 200);
+            const data = await request('/api/walking-data');
+            const records = data.body.verifications.filter(record => record.source_ref === `report:${id}`);
+            assert.equal(records.length, 1);
+            assert.equal(records[0].target_id, String(position.edge_id));
+            assert.deepEqual(records[0].attributes, { shade_observed: 0 });
+            assert.equal((await fix(id)).status, 200);
+            const finished = (await request('/api/reports?status=all')).body.reports.find(report => report.id === id);
+            assert.ok(finished.fixed_at && finished.map_updated_at);
+        });
         await t.test('database outages return 503 without exposing connection details', async () => {
             await fixture.end(); fixture = undefined;
             await admin.query(`DROP DATABASE "${databaseName}" WITH (FORCE)`); dropped = true;

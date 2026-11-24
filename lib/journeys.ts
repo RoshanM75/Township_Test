@@ -1,4 +1,4 @@
-import { buildGraph, buildRoute, evaluateEdge, indexHazards, PROFILES, slotForHour,
+import { buildGraph, buildRoute, evaluateEdge, indexHazards, MODE_WEIGHTS, PROFILES, slotForHour,
     type Graph, type PathEdge, type PathNode, type Mode, type HazardReport, type CostContext, type PathResult } from './routing.ts';
 import { DEFAULT_NEEDS, type WalkingNeeds, type WalkingAsset, type WalkingData, type PlanningInput, type JourneyPlan, type JourneyRoute, type JourneyStep } from './walking.ts';
 import { evidenceFor, isConfirmed, malaysiaHour, openingAt } from './verification.ts';
@@ -7,6 +7,8 @@ import { splitPathAnchors, type PathAnchor } from './path-anchors.ts';
 import { unavailableAssetIds } from './report-status.ts';
 import type { CommunityRoute } from './community-routes.ts';
 import { placeHours } from './place-details.ts';
+import { groupShadeChecks, journeyShade, pathShade } from './route-shade.ts';
+import type { SolarModel } from './solar-shade.ts';
 
 const MODES: Mode[] = ['direct', 'coolest', 'sheltered', 'safest'];
 // Suppress sub-millisecond spherical interpolation noise at exact rest boundaries.
@@ -72,12 +74,14 @@ interface Prepared {
     offset: number;
     assets: Map<string, number>;
     originals: Map<number, PathEdge>;
+    shade?: { model: SolarModel; checks: ReturnType<typeof groupShadeChecks>; edges: Map<number, PathEdge> };
 }
-function prepare(nodes: PathNode[], rawEdges: PathEdge[], data: WalkingData, input: PlanningInput): Prepared | null {
+function prepare(nodes: PathNode[], rawEdges: PathEdge[], data: WalkingData, input: PlanningInput, model?: SolarModel): Prepared | null {
     const projected = rawEdges.filter(e => e.pedestrian_access !== false && e.kind !== 'street').map(edge => {
         const evidence = evidenceFor(data.verifications, edge.is_crossing ? 'crossing' : 'path', edge.id, input.departure_at);
         const values = Object.fromEntries(Object.entries(evidence).map(([key, v]) => [key, v.value]));
         const result = { ...edge, ...values } as PathEdge;
+        if (evidence.covered && evidence.covered.status !== 'verified') result.covered = null;
         const shade = `shade_${slotForHour(malaysiaHour(input.departure_at))}`;
         if (isConfirmed(evidence, shade)) result.shade_source = 'audited';
         if (isConfirmed(evidence, 'lit_ratio')) result.lighting_source = 'audited';
@@ -100,7 +104,8 @@ function prepare(nodes: PathNode[], rawEdges: PathEdge[], data: WalkingData, inp
     }
     const split = splitPathAnchors(nodes, projected, anchors);
     return { graph: buildGraph(split.nodes, split.edges), origin: split.anchors.get('origin')!, offset: closest.distance,
-        assets: split.anchors, originals: new Map(projected.map(e => [Number(e.id), e])) };
+        assets: split.anchors, originals: new Map(projected.map(e => [Number(e.id), e])),
+        shade: model && { model, checks: groupShadeChecks(data.verifications), edges: new Map(rawEdges.map(e => [Number(e.id), e])) } };
 }
 
 function missingFor(edge: PathEdge, input: PlanningInput, data: WalkingData, mode: Mode, validAt = input.departure_at) {
@@ -201,6 +206,10 @@ function search(prepared: Prepared, destination: number, entrance: WalkingAsset,
     };
     offer({ node: prepared.origin, cost: startSeconds, elapsed: startSeconds, sinceRest: startSeconds, longest: startSeconds, active: true });
     const cache = new Map<number, ReturnType<typeof evaluateEdge>>();
+    const solar = ctx.mode === 'coolest' && ctx.slot !== 'night' ? prepared.shade : undefined;
+    const solarCost = new Map<string, number>();
+    const departureAt = Date.parse(input.departure_at);
+    const heatWeight = MODE_WEIGHTS[ctx.mode].heat * (ctx.heatMultiplier ?? 1);
     let examined = 0;
     while (queue.items.length) {
         const label = queue.pop(); if (!label.active) continue;
@@ -227,7 +236,31 @@ function search(prepared: Prepared, destination: number, entrance: WalkingAsset,
             if (!evaluation) { evaluation = evaluateEdge(edge, ctx); cache.set(edge.id, evaluation); }
             if (evaluation.hard.length) continue;
             const seconds = evaluation.walk_s + evaluation.wait_s;
-            offer({ node: to, cost: label.cost + evaluation.cost + (label.via && label.outbound?.has(edge.source_edge_id!) ? seconds * .8 : 0), elapsed: label.elapsed + seconds,
+            let cost = evaluation.cost;
+            if (solar && !ctx.hazards.get(edge.source_edge_id!)?.some(hazard => hazard.kind === 'no_shade')) {
+                const original = solar.edges.get(edge.source_edge_id!)!;
+                const forward = edge.from_node === label.node;
+                // Minute buckets keep adjacent candidate arrivals reusable. The final itinerary
+                // samples the full geometry in travel order, including waits and rests.
+                const minute = Math.floor((departureAt + (label.elapsed + evaluation.wait_s) * 1000) / 60000);
+                const key = `${edge.id}:${minute}:${forward}`;
+                let timed = solarCost.get(key);
+                if (timed === undefined) {
+                    const records = solar.checks.get(`${original.is_crossing ? 'crossing' : 'path'}:${original.id}`) ?? [];
+                    const samples = Math.min(5, Math.max(1, Math.ceil(edge.length_m / 15)));
+                    let exposed = 0;
+                    for (let i = 0; i < samples; i++) {
+                        const fraction = (i + .5) / samples;
+                        const point = pointAt(edge.geometry, forward ? fraction : 1 - fraction);
+                        const reading = pathShade(original, records, minute * 60000 + fraction * evaluation.walk_s * 1000, point, solar.model);
+                        if (reading.condition === 'sun' || reading.condition === 'unknown') exposed++;
+                    }
+                    timed = (evaluation.walk_s * exposed / samples - evaluation.sun_s) * heatWeight;
+                    solarCost.set(key, timed);
+                }
+                cost += timed;
+            }
+            offer({ node: to, cost: label.cost + cost + (label.via && label.outbound?.has(edge.source_edge_id!) ? seconds * .8 : 0), elapsed: label.elapsed + seconds,
                 sinceRest: label.sinceRest + seconds, longest: Math.max(label.longest, label.sinceRest + seconds),
                 previous: label, edge, active: true, via: label.via, outbound: label.outbound });
         }
@@ -282,7 +315,7 @@ function summarise(prepared: Prepared, final: Label, entrance: WalkingAsset, inp
         if (step.edge) {
             const line = step.edge.from_node === node ? step.edge.geometry : [...step.edge.geometry].reverse();
             trace.push({ kind: 'path', name: step.edge.name || `Footpath ${step.edge.source_edge_id}`, edge_id: step.edge.source_edge_id,
-                coordinates: line.map(([lng, lat]) => [lat, lng]), distance_m: step.edge.length_m, start_min: step.previous!.elapsed / 60, end_min: step.elapsed / 60 });
+                coordinates: line.map(([lng, lat]) => [lat, lng]), distance_m: step.edge.length_m, wait_s: evaluateEdge(step.edge, ctx).wait_s, start_min: step.previous!.elapsed / 60, end_min: step.elapsed / 60 });
             coords.push(...line.map(([lng, lat]) => [lat, lng] as [number, number])); node = step.node;
         } else if (step.rest) {
             const p = prepared.graph.nodes.get(node)!;
@@ -297,12 +330,14 @@ function summarise(prepared: Prepared, final: Label, entrance: WalkingAsset, inp
     if (endMetres > .01) trace.push({ kind: 'connection', name: returning ? 'Return to your starting point' : entrance.name,
         coordinates: [coords.at(-2)!, coords.at(-1)!], distance_m: endMetres, start_min: final.elapsed / 60, end_min: totalSeconds / 60 });
     const exposed = path.edges.reduce((n, edge) => n + edge.length_m * (1 - evaluateEdge(edge, ctx).shade), 0);
+    const sun = prepared.shade && journeyShade(trace, input.departure_at, { ...prepared.shade, speed, assets: data.assets });
     const unsheltered = path.edges.reduce((n, e) => n + (e.covered === true ? 0 : e.length_m), 0);
     return { ...result, steps: trace, return_walk: returning, coordinates: coords, edge_ids: originalIDs, destination: input.destination, entrance,
         length_m: result.length_m + connectors, walk_min: result.walk_min + connectors / speed / 60,
         total_min: totalSeconds / 60, rest_min: rests.length * input.needs.rest_duration_min, rest_stops: rests,
         verified_rest_stops: rests.length, longest_without_rest_min: Math.max(final.longest, final.sinceRest + endMetres / speed) / 60,
-        uncovered_m: ctx.slot === 'night' ? 0 : exposed + connectors,
+        uncovered_m: sun ? sun.sun_m + sun.unknown_m : ctx.slot === 'night' ? 0 : exposed + connectors,
+        ...(sun ? { sun_exposure: sun } : {}),
         unsheltered_m: unsheltered + connectors, unverified_crossings: unverifiedCrossings, unchecked_segments: unchecked.length,
         evidence_coverage: evidence.length ? (evidence.length - unchecked.length) / evidence.length : 0,
         suitability: green ? 'green' : 'yellow', explanations, evidence,
@@ -310,10 +345,10 @@ function summarise(prepared: Prepared, final: Label, entrance: WalkingAsset, inp
 }
 
 export function planJourney(nodes: PathNode[], edges: PathEdge[], data: WalkingData,
-    request: PlanningInput, hazards: HazardReport[] = [], feelsLike?: number | null, modes: Mode[] = MODES): JourneyPlan {
+    request: PlanningInput, hazards: HazardReport[] = [], feelsLike?: number | null, modes: Mode[] = MODES, solar?: SolarModel): JourneyPlan {
     const input = { ...request, needs: normaliseNeeds(request.needs) };
     if (!Number.isFinite(Date.parse(input.departure_at))) return { routes: {}, recommended: null, reasons: ['Choose a valid departure time.'] };
-    const prepared = prepare(nodes, edges, data, input);
+    const prepared = prepare(nodes, edges, data, input, solar);
     if (!prepared) return { routes: {}, recommended: null, reasons: ['Your start is more than 50 metres from a mapped pedestrian path.'] };
     const unavailable = unavailableAssetIds(hazards, input.needs.step_free || input.profile === 'wheelchair');
     if (unavailable.has(input.destination.id)) {
@@ -397,7 +432,8 @@ export function reachablePlaces(nodes: PathNode[], edges: PathEdge[], data: Walk
 /** A single search spans both legs, so turning around never resets the rest clock.
  * Turning points are graph locations, not invented seats or destination entrances. */
 export function planReturnWalk(nodes: PathNode[], edges: PathEdge[], data: WalkingData,
-    request: Omit<PlanningInput, 'destination' | 'entrance_id'>, hazards: HazardReport[] = [], feelsLike?: number | null): JourneyPlan {
+    request: Omit<PlanningInput, 'destination' | 'entrance_id'>, hazards: HazardReport[] = [], feelsLike?: number | null,
+    solar?: SolarModel, modes: Mode[] = MODES): JourneyPlan {
     const needs = normaliseNeeds(request.needs);
     if (!Number.isFinite(Date.parse(request.departure_at))) return { routes: {}, recommended: null, reasons: ['Choose a valid departure time.'] };
     const speed = needs.speed_mps ?? PROFILES[request.profile].speed_mps;
@@ -435,11 +471,11 @@ export function planReturnWalk(nodes: PathNode[], edges: PathEdge[], data: Walki
     const finish = { ...destination, kind: 'entrance' as const, name: 'Your starting point' };
     const input: PlanningInput = { ...request, destination, needs };
     const extended = { ...data, assets: [...data.assets, ...turns] };
-    const prepared = prepare(nodes, edges, extended, input);
+    const prepared = prepare(nodes, edges, extended, input, solar);
     if (!prepared) return { routes: {}, recommended: null, reasons: ['Your start is more than 50 metres from a mapped pedestrian path.'] };
     const routes: JourneyPlan['routes'] = {};
     const slot = slotForHour(malaysiaHour(request.departure_at));
-    for (const mode of MODES.filter(m => m !== 'sheltered' && !(slot === 'night' && m === 'coolest'))) {
+    for (const mode of modes.filter(m => m !== 'sheltered' && !(slot === 'night' && m === 'coolest'))) {
         let best = Infinity;
         const ctx: CostContext = { mode, profile: input.profile, slot, speedMps: speed, strictUnknown: needs.verified_only,
             hazards: indexHazards(hazards), heatMultiplier: feelsLike != null && feelsLike >= 32 ? 1.5 : 1 };
@@ -460,7 +496,7 @@ export function planReturnWalk(nodes: PathNode[], edges: PathEdge[], data: Walki
 
 export function planCommunityJourney(nodes: PathNode[], edges: PathEdge[], data: WalkingData,
     request: Omit<PlanningInput, 'destination' | 'entrance_id'>, route: CommunityRoute,
-    hazards: HazardReport[] = []): JourneyPlan {
+    hazards: HazardReport[] = [], solar?: SolarModel): JourneyPlan {
     const path = route.path;
     if (route.status !== 'verified' || !path || route.dataset_id !== data.dataset_id ||
         !route.valid_until || Date.parse(route.valid_until) <= Date.parse(request.departure_at)) {
@@ -476,7 +512,7 @@ export function planCommunityJourney(nodes: PathNode[], edges: PathEdge[], data:
         edge_fraction: path.end.fraction, connection_distance_m: 0, anchor_lat: lat, anchor_lng: lng };
     const allowed = new Set(path.edge_ids);
     const plan = planJourney(nodes, edges.filter(edge => allowed.has(edge.id)), { ...data, assets: [...data.assets, end] },
-        { ...request, origin: path.coordinates[0], destination: end }, hazards, null, ['direct']);
+        { ...request, origin: path.coordinates[0], destination: end }, hazards, null, ['direct'], solar);
     const chosen = plan.recommended ? plan.routes[plan.recommended] : undefined;
     if (chosen && (chosen.edge_ids.length !== path.edge_ids.length ||
         chosen.edge_ids.some((id, i) => id !== path.edge_ids[i]))) {

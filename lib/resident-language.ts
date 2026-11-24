@@ -87,10 +87,35 @@ const malay = {
     'Minimum clear path width': 'Lebar minimum laluan bebas halangan', 'Rest at least every': 'Berehat sekurang-kurangnya setiap',
     'Time at each rest': 'Masa setiap rehat', 'Seat needs a backrest': 'Tempat duduk perlu ada penyandar',
     'Seat needs armrests': 'Tempat duduk perlu ada tempat letak tangan', 'Rest facilities need shelter': 'Tempat rehat perlu berbumbung',
+    'Now': 'Sekarang', 'Leaving now': 'Bertolak sekarang', 'Leave at…': 'Bertolak pada…',
+    'Malaysia time': 'Waktu Malaysia', 'Time of day': 'Waktu dalam sehari', 'Feels like': 'Terasa seperti',
+    'Forecast unavailable at this time': 'Ramalan tidak tersedia untuk waktu ini', 'chance of rain': 'kebarangkalian hujan',
+    'Compare departure times': 'Bandingkan waktu berlepas', 'Checking later departures…': 'Menyemak waktu berlepas kemudian…',
+    'Less direct sun at': 'Kurang terdedah kepada matahari pada',
+    'No clearly shadier departure in the next hour.': 'Tiada waktu berlepas yang lebih teduh dalam sejam akan datang.',
+    'shade unknown': 'teduhan tidak diketahui', 'in direct sun': 'di bawah cahaya matahari langsung',
+    'less in direct sun': 'kurang terdedah kepada matahari', 'Longest exposed stretch': 'Jarak terdedah terpanjang', 'Estimated direct sun': 'Anggaran cahaya matahari langsung',
+    'Estimated shade': 'Anggaran teduhan', 'Field-checked shade': 'Teduhan disemak di lokasi',
+    'Field-checked direct sun': 'Cahaya matahari langsung disemak di lokasi',
+    'Checked roof cover': 'Bumbung telah disemak', 'Shade unknown': 'Teduhan tidak diketahui', 'Unknown': 'Tidak diketahui', 'Outside daylight': 'Di luar waktu siang',
+    'Show shade on map': 'Papar teduhan pada peta', 'Shade at this time': 'Teduhan pada waktu ini', 'At arrival': 'Semasa tiba',
+    'Seat checked': 'Tempat duduk telah disemak',
+    'Shade map correction': 'Pembetulan peta teduhan', 'Report shade here': 'Lapor teduhan di sini',
+    'What changed?': 'Apa yang berubah?', 'Missing or removed tree': 'Pokok tiada atau dibuang', 'Removed awning': 'Awning dibuang',
+    'Shade differs from the map': 'Teduhan berbeza daripada peta', 'Observed at (Malaysia time)': 'Dilihat pada (waktu Malaysia)',
+    'Choose an observation time in the past.': 'Pilih waktu pemerhatian yang lalu.', 'Observed': 'Dilihat', 'Map updated': 'Peta dikemas kini', 'Share plan': 'Kongsi pelan',
+    'Share shortcut': 'Kongsi laluan pintas', 'Copied shortcut link': 'Pautan laluan pintas disalin',
+    'Copy link failed': 'Pautan tidak dapat disalin',
     'Data pending': 'Data belum tersedia',
 } as const;
 
 export type ResidentLabel = keyof typeof malay;
 export function residentText(language: ResidentLanguage, label: ResidentLabel) {
     return language === 'ms' ? malay[label] : label;
+}
+
+export function malaysiaTimeLabel(instant: string, language: ResidentLanguage, includeDate = false) {
+    return new Date(instant).toLocaleString(language === 'ms' ? 'ms-MY' : 'en-MY', {
+        timeZone: 'Asia/Kuala_Lumpur', ...(includeDate ? { dateStyle: 'medium' } : {}), timeStyle: 'short',
+    });
 }

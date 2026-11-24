@@ -458,7 +458,7 @@
 .tg-route-hero strong { font-size: 1.95rem; font-weight: 790; letter-spacing: -.035em; line-height: 1.06; }
 .tg-route-hero > div > span, .tg-route-card-time small { color: var(--muted); }
 .tg-roof-detail { display: inline-flex; align-items: center; gap: .35rem; color: var(--cover); font-weight: 630; }
-.tg-roof-detail > span, .tg-map-roof-key > span {
+.tg-roof-detail > span, .tg-map-roof-key:not(.tg-map-shade-key) > span {
     flex: none; width: 1.15rem; height: .32rem; border-radius: 999px; background-color: var(--cover);
     background-image: repeating-linear-gradient(90deg, transparent 0 3px, var(--surface) 3px 4px);
 }
@@ -531,3 +531,14 @@
 .tg-report-photo { float: right; width: 3.25rem; height: 3.25rem; object-fit: cover; border-radius: .5rem; margin-left: .5rem; }
 .tg.hc .tg-photo-add { border-color: #000; }
 .tg-photo-reason { display: block; margin-top: .2rem; font-size: .75rem; opacity: .8; overflow-wrap: anywhere; }
+
+.tg-departure { display: grid; gap: .45rem; }
+.tg-departure-row { display: flex; align-items: center; gap: .65rem; }
+.tg-departure-row > span { flex: 1; min-width: 0; }
+.tg-departure-row small, .tg-route-sun small { display: block; }
+.tg-departure-row .tg-text-action { padding-inline: .5rem; }
+.tg-departure .tg-details { box-shadow: none; }
+.tg-time-slider input { display: block; width: 100%; min-height: 2.75rem; accent-color: var(--brand); }
+.tg-time-option { justify-content: space-between; flex-wrap: wrap; text-align: left; }
+.tg-time-option > span, .tg-route-sun { font-size: .8em; line-height: 1.3; }
+.tg-route-sun { display: block; color: var(--muted); }

@@ -1,5 +1,6 @@
 import { metres, pointAt } from '../lib/walking-geometry.ts';
 import { lineGeometry } from '../lib/data/osm.ts';
+import { sunVector } from '../lib/solar-shade.ts';
 
 const radians = Math.PI / 180;
 const GRID = 40;
@@ -14,24 +15,6 @@ function metric(value, min, max) {
 function projectAt([lat, lng]) {
     const scaleX = 111320 * Math.cos(lat * radians);
     return ([x, y]) => [(x - lng) * scaleX, (y - lat) * 110574];
-}
-
-// NOAA approximation of the solar position. Coordinates are east, north, up.
-function sunVector(date, hour, [lat, lng]) {
-    const dayOfYear = (Date.parse(date) - Date.parse(`${date.slice(0, 4)}-01-01`)) / 86400000 + 1;
-    const g = 2 * Math.PI / 365 * (dayOfYear - 1 + (hour - 12) / 24);
-    const equation = 229.18 * (.000075 + .001868 * Math.cos(g) - .032077 * Math.sin(g)
-        - .014615 * Math.cos(2 * g) - .040849 * Math.sin(2 * g));
-    const declination = .006918 - .399912 * Math.cos(g) + .070257 * Math.sin(g)
-        - .006758 * Math.cos(2 * g) + .000907 * Math.sin(2 * g)
-        - .002697 * Math.cos(3 * g) + .00148 * Math.sin(3 * g);
-    const angle = ((hour * 60 + equation + 4 * lng - 480) / 4 - 180) * radians;
-    const latitude = lat * radians;
-    return [
-        -Math.cos(declination) * Math.sin(angle),
-        Math.cos(latitude) * Math.sin(declination) - Math.sin(latitude) * Math.cos(declination) * Math.cos(angle),
-        Math.sin(latitude) * Math.sin(declination) + Math.cos(latitude) * Math.cos(declination) * Math.cos(angle),
-    ];
 }
 
 function inside([x, y], polygon) {
@@ -75,8 +58,7 @@ function inShadow(index, point) {
         x >= bounds[0] && y >= bounds[1] && x <= bounds[2] && y <= bounds[3] && polygons.some(p => inside(point, p)));
 }
 
-export function modelPilotShade(edges, elements, centre, modelDate, survey = null) {
-    const project = projectAt(centre);
+export function shadeObjects(elements, centre, survey = null) {
     const objects = [];
     let buildings = 0, crowns = 0;
     for (const element of elements) {
@@ -86,17 +68,18 @@ export function modelPilotShade(edges, elements, centre, modelDate, survey = nul
             const line = lineGeometry(element);
             if (height && line.length >= 4 && line.length <= 1500 && line.every(p => p.every(Number.isFinite))
                 && line[0][0] === line.at(-1)[0] && line[0][1] === line.at(-1)[1]) {
-                objects.push({ polygon: line.slice(0, -1).map(project), height });
+                objects.push({ ring: line.slice(0, -1), height, base: 0 });
                 buildings++;
             }
         } else if (element.type === 'node' && tags.natural === 'tree') {
             const height = metric(tags.height, 1, 80), diameter = metric(tags.diameter_crown, .5, 60);
             if (!height || !diameter || !Number.isFinite(element.lon) || !Number.isFinite(element.lat)) continue;
-            const [x, y] = project([element.lon, element.lat]);
-            const polygon = Array.from({ length: 16 }, (_, i) => [
-                x + diameter / 2 * Math.cos(i * Math.PI / 8), y + diameter / 2 * Math.sin(i * Math.PI / 8),
+            const longitudeScale = 111320 * Math.cos(element.lat * radians);
+            const ring = Array.from({ length: 16 }, (_, i) => [
+                element.lon + diameter / (2 * longitudeScale) * Math.cos(i * Math.PI / 8),
+                element.lat + diameter / (2 * 110574) * Math.sin(i * Math.PI / 8),
             ]);
-            objects.push({ polygon, height, base: height });
+            objects.push({ ring, height, base: height });
             crowns++;
         }
     }
@@ -112,14 +95,21 @@ export function modelPilotShade(edges, elements, centre, modelDate, survey = nul
             ring[0][0] !== ring.at(-1)[0] || ring[0][1] !== ring.at(-1)[1]) {
             throw new Error('Expected local closed WGS84 building or canopy polygons with height_m.');
         }
-        objects.push({ polygon: ring.slice(0, -1).map(project), height, base: roof ? 0 : height });
+        objects.push({ ring: ring.slice(0, -1), height, base: roof ? 0 : height });
         if (roof) buildings++;
         else crowns++;
     }
 
+    return { objects, buildings, crowns };
+}
+
+export function modelPilotShade(edges, elements, centre, modelDate, survey = null) {
+    const project = projectAt(centre);
+    const { objects, buildings, crowns } = shadeObjects(elements, centre, survey);
+    const shapes = objects.map(({ ring, ...object }) => ({ ...object, polygon: ring.map(project) }));
     const paths = {};
     for (const [slot, hour] of Object.entries(HOURS)) {
-        const index = shadowIndex(objects, sunVector(modelDate, hour, centre));
+        const index = shadowIndex(shapes, sunVector(modelDate, hour, [centre[1], centre[0]]));
         for (const edge of edges) {
             if (edge.covered || Number(edge.layer) < 0 || Number(edge.level) < 0 ||
                 (edge.bridge && edge.bridge !== 'no') || (edge.tunnel && edge.tunnel !== 'no')) continue;

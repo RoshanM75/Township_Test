@@ -13,6 +13,20 @@ export function RouteCoverage({ route, language }: { route: JourneyRoute; langua
     </span>;
 }
 
+export function RouteSun({ route, language, compact = false }: { route: JourneyRoute; language: ResidentLanguage; compact?: boolean }) {
+    const exposure = route.sun_exposure;
+    if (!exposure?.daylight_s) return null;
+    const t = (label: ResidentLabel) => residentText(language, label);
+    const allUnknown = exposure.unknown_s >= exposure.daylight_s - .01;
+    const unknown = exposure.unknown_s >= 1 && `${Math.ceil(exposure.unknown_s / 60)} min ${t('shade unknown')}`;
+    const minutes = exposure.sun_s / 60;
+    return <span className="tg-route-sun">
+        {allUnknown ? t('Shade unknown') : `${minutes >= .1 && minutes < 1 ? '<1' : Math.round(minutes)} min ${t('in direct sun')}`}
+        {!allUnknown && unknown && ` · ${unknown}`}
+        {!compact && exposure.longest_sun_m > 0 && <small>{t('Longest exposed stretch')} {Math.round(exposure.longest_sun_m)} m</small>}
+    </span>;
+}
+
 export function RouteChecks({ route, language }: { route: JourneyRoute; language: ResidentLanguage }) {
     const t = (label: ResidentLabel) => residentText(language, label);
     const checked = route.suitability === 'green';
@@ -30,6 +44,7 @@ export default function RouteComparison({ routes, modes, chosen, fastest, night,
 }) {
     const t = (label: ResidentLabel) => residentText(language, label);
     const base = routes[fastest]?.total_min ?? 0;
+    const baseSun = routes[fastest]?.sun_exposure;
 
     function choices(items: Mode[]) {
         return items.map(mode => {
@@ -37,10 +52,14 @@ export default function RouteComparison({ routes, modes, chosen, fastest, night,
             if (!route) return null;
             const Icon = icons[mode];
             const seconds = Math.max(0, Math.round((route.total_min - base) * 60));
+            const sun = route.sun_exposure;
+            const savings = sun && baseSun && sun.daylight_s > 0 ? Math.floor((baseSun.sun_s - sun.sun_s - sun.unknown_s) / 60) : 0;
             const extra = seconds >= 60 ? `${Math.ceil(seconds / 60)} min` : `${seconds} ${t('sec')}`;
             return <button type="button" key={mode} className="tg-route-card" aria-pressed={chosen === mode} onClick={() => onChoose(mode)}>
                 <Icon size={20} aria-hidden />
                 <span className="tg-route-card-label"><strong>{t(routeLabel(mode, night, fastest))}</strong>
+                    <RouteSun route={route} language={language} />
+                    {savings > 0 && <small>{savings} min {t('less in direct sun')}</small>}
                     <RouteCoverage route={route} language={language} />
                 </span>
                 <span className="tg-route-card-time"><strong>{walkMinutes(route)} min</strong>
@@ -50,7 +69,7 @@ export default function RouteComparison({ routes, modes, chosen, fastest, night,
         });
     }
 
-    const lead = [...new Set([fastest, 'sheltered' as Mode, chosen])].filter(mode => modes.includes(mode));
+    const lead = [...new Set([fastest, ...(!night ? ['coolest' as Mode] : []), 'sheltered' as Mode, chosen])].filter(mode => modes.includes(mode));
     const more = modes.filter(mode => !lead.includes(mode));
     return <div className="tg-stack" role="group" aria-label={t('Route choices')}>
         <div className="tg-route-grid">{choices(lead)}</div>

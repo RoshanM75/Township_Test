@@ -5,7 +5,7 @@ import type { JourneyRoute, VerificationRecord } from '@/lib/walking';
 import type { PathEdge } from '@/lib/routing';
 import { residentText, type ResidentLanguage } from '@/lib/resident-language';
 
-export default function WalkTimeline({ route, edges, records, onFocus, language: appLanguage }: { route: JourneyRoute; edges: PathEdge[]; records: VerificationRecord[]; onFocus?: (point: [number, number]) => void; language?: ResidentLanguage }) {
+export default function WalkTimeline({ route, edges, records, onFocus, onShadeReport, language: appLanguage }: { route: JourneyRoute; edges: PathEdge[]; records: VerificationRecord[]; onFocus?: (point: [number, number]) => void; onShadeReport?: (id: number, point?: [number, number]) => void; language?: ResidentLanguage }) {
     const [all, setAll] = useState(false);
     const [override, setOverride] = useState<WalkLanguage | undefined>(() => {
         try {
@@ -27,19 +27,22 @@ export default function WalkTimeline({ route, edges, records, onFocus, language:
                 <option value="en">English</option><option value="ms" lang="ms">Bahasa Melayu</option>
             </select>
         </label>
-        <ol lang={language} className="mt-3 space-y-3 border-l-2 border-emerald-200 pl-3">{(all ? items : items.slice(0, 8)).map(item => <li key={item.id} className="rounded-lg border border-slate-200 p-3">
-            <p className="text-xs font-bold text-emerald-900">{Math.round(item.start_min)}{item.end_min > item.start_min ? `–${Math.ceil(item.end_min)}` : ''} min{item.distance_m > 0 ? ` · ${Math.round(item.distance_m)} m` : ''}</p>
-            <button type="button" disabled={!onFocus} onClick={() => onFocus?.(item.point)} className="min-h-11 text-left text-sm font-bold underline disabled:no-underline">{item.title}</button>
-            <p className="text-xs leading-relaxed text-slate-600">{item.detail}</p>
-            {canSpeak && <button type="button" className="min-h-11 text-xs font-bold underline" aria-label={`${language === 'ms' ? 'Dengar' : 'Listen to'} ${item.title}`}
-                onClick={() => {
-                    const message = new SpeechSynthesisUtterance(`${item.title}. ${item.detail}`);
-                    message.lang = language === 'ms' ? 'ms-MY' : 'en-MY';
-                    message.rate = 0.9;
-                    window.speechSynthesis.cancel();
-                    window.speechSynthesis.speak(message);
-                }}>{language === 'ms' ? 'Dengar arahan' : 'Read aloud'}</button>}
-        </li>)}</ol>
+        <ol lang={language} className="mt-3 space-y-3 border-l-2 border-emerald-200 pl-3">{(all ? items : items.slice(0, 8)).map(item =>
+            <li key={item.id} className="rounded-lg border border-slate-200 p-3">
+                <p className="text-xs font-bold text-emerald-900">{Math.round(item.start_min)}{item.end_min > item.start_min ? `–${Math.ceil(item.end_min)}` : ''} min{item.distance_m > 0 ? ` · ${Math.round(item.distance_m)} m` : ''}</p>
+                <button type="button" disabled={!onFocus} onClick={() => onFocus?.(item.point)} className="min-h-11 text-left text-sm font-bold underline disabled:no-underline">{item.title}</button>
+                <p className="text-xs leading-relaxed text-slate-600">{item.detail}</p>
+                {canSpeak && <button type="button" className="min-h-11 text-xs font-bold underline" aria-label={`${language === 'ms' ? 'Dengar' : 'Listen to'} ${item.title}`}
+                    onClick={() => {
+                        const message = new SpeechSynthesisUtterance(`${item.title}. ${item.detail}`);
+                        message.lang = language === 'ms' ? 'ms-MY' : 'en-MY';
+                        message.rate = 0.9;
+                        window.speechSynthesis.cancel();
+                        window.speechSynthesis.speak(message);
+                    }}>{language === 'ms' ? 'Dengar arahan' : 'Read aloud'}</button>}
+                {item.edge_id !== undefined && onShadeReport && <button type="button" className="min-h-11 text-xs font-bold underline"
+                    onClick={() => onShadeReport(item.edge_id!, item.point)}>{residentText(language, 'Report shade here')}</button>}
+            </li>)}</ol>
         {!all && items.length > 8 && <button type="button" className="mt-2 min-h-11 font-bold underline" onClick={() => setAll(true)}>Show all {items.length} sections</button>}
     </details>;
 }

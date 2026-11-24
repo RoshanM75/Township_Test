@@ -2,7 +2,7 @@ import type { JourneyRoute, VerificationRecord } from './walking.ts';
 import type { PathEdge } from './routing.ts';
 import { evidenceFor } from './verification.ts';
 
-export interface TimelineItem { id: string; title: string; detail: string; start_min: number; end_min: number; distance_m: number; point: [number, number]; kind: 'path' | 'crossing' | 'rest' | 'connection' | 'turn' | 'arrival' }
+export interface TimelineItem { id: string; title: string; detail: string; start_min: number; end_min: number; distance_m: number; edge_id?: number; point: [number, number]; kind: 'path' | 'crossing' | 'rest' | 'connection' | 'turn' | 'arrival' }
 export type WalkLanguage = 'en' | 'ms';
 
 export function walkTimeline(route: JourneyRoute, edges: PathEdge[], records: VerificationRecord[], language: WalkLanguage = 'en'): TimelineItem[] {
@@ -46,7 +46,7 @@ export function walkTimeline(route: JourneyRoute, edges: PathEdge[], records: Ve
         const previous = result.at(-1);
         if (previous && kind === 'path' && previous.kind === kind && previous.title === title && previous.detail === detail) {
             previous.end_min = step.end_min; previous.distance_m += step.distance_m;
-        } else result.push({ id: `step-${index}`, title, detail, kind, start_min: step.start_min, end_min: step.end_min, distance_m: step.distance_m, point: step.coordinates[0] });
+        } else result.push({ id: `step-${index}`, title, detail, kind, start_min: step.start_min, end_min: step.end_min, distance_m: step.distance_m, ...(step.edge_id === undefined ? {} : { edge_id: step.edge_id }), point: step.coordinates[0] });
     }
     result.push({ id: 'arrival', title: route.return_walk ? say('Back at your start', 'Kembali ke titik mula') : `${say('Arrive', 'Tiba')} · ${route.entrance.name}`, kind: 'arrival', start_min: route.total_min,
         end_min: route.total_min, distance_m: 0, point: route.coordinates.at(-1)!, detail: say('Times are estimates. Conditions may change during the walk.', 'Masa adalah anggaran. Keadaan boleh berubah semasa berjalan.') });

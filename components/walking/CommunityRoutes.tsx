@@ -51,13 +51,16 @@ interface Props {
     onPlan: (route: CommunityRoute) => void;
     onShared: () => void;
     initialWalk?: CompletedWalk;
+    initialRouteId?: string;
+    onShare?: (route: CommunityRoute) => Promise<boolean>;
     language?: ResidentLanguage;
 }
 
-export default function CommunityRoutes({ area, dataset, graph, walks, startPoints, routes, now, onPlan, onShared, initialWalk, language = 'en' }: Props) {
+export default function CommunityRoutes({ area, dataset, graph, walks, startPoints, routes, now, onPlan, onShared, initialWalk, initialRouteId, onShare, language = 'en' }: Props) {
     const [editing, setEditing] = useState(!!initialWalk);
     const [fromWalk, setFromWalk] = useState(initialWalk);
-    const [selected, setSelected] = useState<CommunityRoute | null>(null);
+    const [selected, setSelected] = useState<string | null>(initialRouteId ?? null);
+    const [shareMessage, setShareMessage] = useState('');
     const [receipt, setReceipt] = useState(() => readStored(receiptKey(area)));
     const [mine, setMine] = useState<CommunityRoute | null>(null);
     const [receiptError, setReceiptError] = useState('');
@@ -71,7 +74,7 @@ export default function CommunityRoutes({ area, dataset, graph, walks, startPoin
         return () => { cancelled = true; };
     }, [receipt, area, refresh]);
     const nearby = routes.filter(route => route.dataset_id === dataset && route.path);
-    const inspected = nearby.find(route => route.id === selected?.id);
+    const inspected = nearby.find(route => route.id === selected);
     if (editing) return <CommunityRouteEditor area={area} dataset={dataset} graph={graph} walks={walks} startPoints={startPoints} initialWalk={fromWalk} language={language}
         onExit={() => { setEditing(false); setFromWalk(undefined); }} onSubmitted={(route, submission) => {
             setMine(route); setReceipt(submission); setEditing(false); setFromWalk(undefined); onShared();
@@ -91,11 +94,11 @@ export default function CommunityRoutes({ area, dataset, graph, walks, startPoin
         {IS_PAGES_PREVIEW ? <p className="tg-small">You can draw or record a route and save a draft on this device. Shared routes and reviews are available on the server app.</p>
             : <section className="tg-stack">
                 <h3 className="tg-h2">Routes shared in this area</h3>
-                {nearby.length === 0 && <p className="tg-small">Published routes will appear here after review.</p>}
+                {nearby.length === 0 && <p className="tg-small">{initialRouteId ? 'This shared shortcut is unavailable in the current map.' : 'Published routes will appear here after review.'}</p>}
                 <ul className="tg-stack" aria-label="Published community routes">
                     {nearby.map(route => <li key={route.id}>
                         <button type="button" className="tg-card w-full" aria-pressed={inspected?.id === route.id}
-                            onClick={() => setSelected(previous => previous?.id === route.id ? null : route)}>
+                            onClick={() => { setShareMessage(''); setSelected(previous => previous === route.id ? null : route.id); }}>
                             <span className="min-w-0 break-words"><strong>{route.title}</strong>
                                 <span className="tg-small block">{route.path?.length_m} m · {communityStatusLabel(route, now)}</span></span>
                         </button>
@@ -110,6 +113,11 @@ export default function CommunityRoutes({ area, dataset, graph, walks, startPoin
                     {inspected.status === 'verified' && inspected.valid_until && Date.parse(inspected.valid_until) > Date.parse(now)
                         ? <button type="button" className="tg-btn tg-btn-primary" onClick={() => onPlan(inspected)}>Plan from this route’s start</button>
                         : <p className="tg-small">Navigation becomes available after a current field check.</p>}
+                    {onShare && <button type="button" className="tg-btn" onClick={async () => {
+                        const copied = await onShare(inspected);
+                        setShareMessage(residentText(language, copied ? 'Copied shortcut link' : 'Copy link failed'));
+                    }}>{residentText(language, 'Share shortcut')}</button>}
+                    {shareMessage && <p className="tg-small" role="status">{shareMessage}</p>}
                 </div>}
             </section>}
     </div>;

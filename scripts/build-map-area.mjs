@@ -1,5 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { gunzipSync } from 'node:zlib';
+import { PILOTS } from '../lib/pilots.ts';
+import { shadeObjects } from './pilot-shade.mjs';
 
 const output = new URL('../public/map-area/', import.meta.url);
 const extracts = {
@@ -103,6 +105,7 @@ for (const [area, sources] of Object.entries(extracts)) {
         for (const element of map?.elements ?? []) elements.set(`${element.type}:${element.id}`, element);
     }
     const features = [];
+    const supplementalBuildings = [];
     if (area === 'pasar-seni') {
         const extension = await readMapSource('data/pasar-seni/source/expanded-map-osm.json.gz');
         const streets = await readMapSource('data/pasar-seni/source/expanded-map-streets.geojson.gz');
@@ -111,6 +114,31 @@ for (const [area, sources] of Object.entries(extracts)) {
             if (!elements.has(key)) elements.set(key, element);
         }
         features.push(...streets?.features ?? []);
+        const buildings = await readMapSource('data/pasar-seni/source/bukit-bintang-buildings.geojson.gz');
+        for (const feature of buildings?.features ?? []) {
+            const [type, id] = feature.id.split('/');
+            const existing = elements.get(`${type}:${id}`);
+            if (existing?.geometry?.length >= 4 && existing.tags?.building) {
+                // Preserve the newer outline and use archived height tags where the current outline has none.
+                if (!existing.tags.height && !existing.tags['building:levels']) {
+                    const { height, 'building:levels': levels } = feature.properties;
+                    if (height || levels) existing.tags = { height, 'building:levels': levels, ...existing.tags };
+                }
+                continue;
+            }
+            const polygons = feature.geometry.type === 'Polygon' ? [feature.geometry.coordinates] : feature.geometry.coordinates;
+            for (const [index, polygon] of polygons.entries()) {
+                const element = { type: 'way', id: `${feature.id}:${index}`, tags: feature.properties,
+                    geometry: polygon[0].map(([lon, lat]) => ({ lon, lat })) };
+                const map = mapFeature(element, polygon[0]);
+                if (!map || map.properties.kind !== 'building') continue;
+                features.push({ ...map, geometry: { type: 'Polygon', coordinates: polygon } });
+                const label = placeLabel(element, polygon[0], map);
+                if (label) features.push(label);
+                // Courtyards remain open on the basemap. The shade model uses solid single-ring footprints.
+                if (polygon.length === 1) supplementalBuildings.push(element);
+            }
+        }
     }
     const names = new Set();
     for (const element of elements.values()) {
@@ -126,4 +154,13 @@ for (const [area, sources] of Object.entries(extracts)) {
         }
     }
     await writeFile(new URL(`${area}.geojson`, output), JSON.stringify({ type: 'FeatureCollection', features }));
+    const [lat, lng] = PILOTS[area].centre;
+    const { objects } = shadeObjects([...elements.values(), ...supplementalBuildings], [lat, lng]);
+    const nonGroundWays = [...elements.values()].filter(element => {
+        const tags = element.tags ?? {};
+        return element.type === 'way' && tags.highway && (Number(tags.layer) !== 0 && Number.isFinite(Number(tags.layer))
+            || Number(tags.level) !== 0 && Number.isFinite(Number(tags.level)) || (tags.bridge && tags.bridge !== 'no')
+            || (tags.tunnel && tags.tunnel !== 'no') || tags.indoor === 'yes');
+    }).map(element => String(element.id));
+    await writeFile(new URL(`${area}-shade.json`, output), JSON.stringify({ centre: [lng, lat], objects, non_ground_ways: nonGroundWays }));
 }
