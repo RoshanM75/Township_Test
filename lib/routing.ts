@@ -176,6 +176,18 @@ export function buildGraph(nodes: PathNode[], edges: PathEdge[]): Graph {
     return { nodes: nm, edges: em, adj };
 }
 
+export function reachableNodes(graph: Graph, starts: number[]) {
+    const seen = new Set(starts), queue = [...seen];
+    for (let i = 0; i < queue.length; i++) {
+        for (const { to } of graph.adj.get(queue[i]) ?? []) {
+            if (seen.has(to)) continue;
+            seen.add(to);
+            queue.push(to);
+        }
+    }
+    return seen;
+}
+
 function localMetres(lat: number) {
     return { kx: 111320 * Math.cos((lat * Math.PI) / 180), ky: 110574 };
 }

@@ -1,7 +1,7 @@
 import { planCommunityJourney, planJourney, planReturnWalk, reachablePlaces } from './journeys.ts';
 import { findFacilities, type FacilityKind } from './walk-tools.ts';
 import type { PathNode, PathEdge, HazardReport, Mode } from './routing.ts';
-import type { WalkingData, PlanningInput } from './walking.ts';
+import { WALK_BUDGETS, type JourneyPlan, type WalkingData, type PlanningInput } from './walking.ts';
 import type { CommunityRoute } from './community-routes.ts';
 import { solarModel, type ShadeDataset } from './solar-shade.ts';
 
@@ -21,6 +21,7 @@ export interface SearchCommand {
     ids?: string[];
     community?: CommunityRoute;
     modes?: Mode[];
+    suggestBudget?: boolean;
 }
 
 export interface DepartureOption {
@@ -41,9 +42,22 @@ export function dispatchPlan(snapshot: PlanningSnapshot, command: PlanningComman
     const { nodes, edges, walking, hazards, shade } = snapshot;
     const model = shade && solarModel(shade);
     switch (command.type) {
-        case 'journey':
+        case 'journey': {
             if (!('destination' in command.input)) throw Error('Choose a destination.');
-            return planJourney(nodes, edges, walking, command.input, hazards, command.feels_like, command.modes, model);
+            const input = command.input;
+            const result = planJourney(nodes, edges, walking, input, hazards, command.feels_like, command.modes, model);
+            const maximumBudget = WALK_BUDGETS.at(-1)!;
+            if (!command.suggestBudget || result.issue?.kind !== 'needs' || input.needs.budget_min >= maximumBudget) return result;
+            const { routes } = planJourney(nodes, edges, walking, { ...input, needs: { ...input.needs, budget_min: maximumBudget } },
+                hazards, command.feels_like, ['direct']);
+            const minutes = Math.ceil(routes.direct?.total_min ?? Infinity);
+            const budget = WALK_BUDGETS.find(option => option >= minutes && option > input.needs.budget_min);
+            if (!budget || minutes <= input.needs.budget_min) return result;
+            return {
+                ...result, issue: { kind: 'budget', estimated_min: minutes, suggested_min: budget },
+                reasons: [`A matching route takes about ${minutes} min. Your trip budget is ${input.needs.budget_min} min.`],
+            } satisfies JourneyPlan;
+        }
         case 'community':
             if (!command.community) throw Error('Choose a community route.');
             return planCommunityJourney(nodes, edges, walking, command.input, command.community, hazards, model);

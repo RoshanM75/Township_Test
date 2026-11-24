@@ -83,6 +83,8 @@ export interface WalkingNeeds {
     speed_mps: number | null;
 }
 
+export const WALK_BUDGETS = [5, 10, 15, 20, 30, 45, 60, 90, 120] as const;
+
 export const DEFAULT_NEEDS: WalkingNeeds = {
     step_free: false, max_slope_pct: 8, avoid_uncontrolled_crossings: false,
     avoid_uneven_surfaces: false, rest_backrest: false, rest_armrests: false, rest_shelter: false,
@@ -127,10 +129,15 @@ export interface JourneyRoute extends RouteResult {
     arrival_at: string;
 }
 
+export type RouteIssue =
+    | { kind: 'start' | 'connection' | 'entrance' | 'closed' | 'needs' }
+    | { kind: 'budget'; estimated_min: number; suggested_min: number };
+
 export interface JourneyPlan {
     routes: Partial<Record<Mode, JourneyRoute>>;
     recommended: Mode | null;
     reasons: string[];
+    issue?: RouteIssue;
 }
 
 export interface PlanningInput {

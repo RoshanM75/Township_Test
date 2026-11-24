@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {planJourney,reachablePlaces,normaliseNeeds} from '../lib/journeys.ts';
 import {evaluateEdge,indexHazards} from '../lib/routing.ts';
+import {dispatchPlan} from '../lib/planning-dispatch.ts';
 import {nodes,edges,data,input,record,asset} from './helpers/journey-fixture.mjs';
 
 test('unknown conditions never become green, including the best available route',()=>{
@@ -122,4 +123,27 @@ test('a seat whose checks expire before arrival cannot fulfil the rest interval'
 test('uneven-surface preferences are enforced without a fallback over that surface',()=>{
     const info=data();info.verifications.push(record('path',1,{surface_rating:2},{observed_at:'2026-11-16T00:00:00Z'}));
     assert.deepEqual(planJourney(nodes,edges,info,input({avoid_uneven_surfaces:true})).routes.direct.edge_ids,[2,3]);
+});
+
+
+test('a mapped destination across a network gap gives a connection issue', () => {
+    const separated = { ...edges[0], id: 20, from_node: 20, to_node: 21, geometry: [[101.003, 3], [101.004, 3]] };
+    const target = { ...input().destination, lng: 101.004 };
+    const entrance = { ...asset(101, 'entrance', 1, 1, target.id), lng: 101.004, anchor_lng: 101.004, edge_id: 20 };
+    const network = [...nodes, { id: 20, lat: 3, lng: 101.003 }, { id: 21, lat: 3, lng: 101.004 }];
+    const plan = planJourney(network, [...edges, separated], { ...data(false), assets: [target, entrance] }, { ...input(), destination: target });
+    assert.equal(plan.issue?.kind, 'connection');
+    assert.equal(plan.recommended, null);
+});
+
+test('a longer budget is suggested only when it preserves the selected walking needs', () => {
+    const path = { ...edges[0], length_m: 560 };
+    const request = input({ budget_min: 5 });
+    const run = (edge, parameters = request) => dispatchPlan({ nodes, edges: [edge], walking: data(false), hazards: [] },
+        { type: 'journey', input: parameters, suggestBudget: true });
+    const short = run(path);
+    assert.deepEqual(short.issue, { kind: 'budget', estimated_min: 10, suggested_min: 10 });
+    assert.equal(short.recommended, null);
+    assert.ok(run(path, input({ budget_min: 10 })).routes.direct);
+    assert.equal(run({ ...path, has_steps: true }).issue?.kind, 'needs');
 });

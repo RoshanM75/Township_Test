@@ -1,4 +1,4 @@
-import { buildGraph, buildRoute, evaluateEdge, indexHazards, MODE_WEIGHTS, PROFILES, slotForHour,
+import { buildGraph, buildRoute, evaluateEdge, indexHazards, MODE_WEIGHTS, PROFILES, reachableNodes, slotForHour,
     type Graph, type PathEdge, type PathNode, type Mode, type HazardReport, type CostContext, type PathResult } from './routing.ts';
 import { DEFAULT_NEEDS, type WalkingNeeds, type WalkingAsset, type WalkingData, type PlanningInput, type JourneyPlan, type JourneyRoute, type JourneyStep } from './walking.ts';
 import { evidenceFor, isConfirmed, malaysiaHour, openingAt } from './verification.ts';
@@ -349,7 +349,7 @@ export function planJourney(nodes: PathNode[], edges: PathEdge[], data: WalkingD
     const input = { ...request, needs: normaliseNeeds(request.needs) };
     if (!Number.isFinite(Date.parse(input.departure_at))) return { routes: {}, recommended: null, reasons: ['Choose a valid departure time.'] };
     const prepared = prepare(nodes, edges, data, input, solar);
-    if (!prepared) return { routes: {}, recommended: null, reasons: ['Your start is more than 50 metres from a mapped pedestrian path.'] };
+    if (!prepared) return { routes: {}, recommended: null, issue: { kind: 'start' }, reasons: ['Your start is more than 50 metres from a mapped pedestrian path.'] };
     const unavailable = unavailableAssetIds(hazards, input.needs.step_free || input.profile === 'wheelchair');
     if (unavailable.has(input.destination.id)) {
         return { routes: {}, recommended: null, reasons: ['A checked report says this place is currently unavailable.'] };
@@ -362,8 +362,9 @@ export function planJourney(nodes: PathNode[], edges: PathEdge[], data: WalkingD
         const mapped = candidates.filter(a => a.properties.connection_model === 'mapped_entrance');
         if (mapped.length) candidates = mapped;
     }
-    if (!candidates.length) return { routes: {}, recommended: null, reasons: [connected.length
+    if (!candidates.length) return { routes: {}, recommended: null, issue: { kind: 'entrance' }, reasons: [connected.length
         ? 'A checked report says the matching access points are currently unavailable.'
+        : input.entrance_id ? 'The selected access point is no longer connected to the walking map.'
         : 'This place has no mapped access point connected to the walking network.'] };
     const routes: JourneyPlan['routes'] = {};
     let searchLimited = false, closedAtArrival = false;
@@ -371,8 +372,12 @@ export function planJourney(nodes: PathNode[], edges: PathEdge[], data: WalkingD
     if (requestFacts.evidence.available?.status === 'verified' && requestFacts.values.available === false) {
         return { routes: {}, recommended: null, reasons: ['The current place check says it is unavailable.'] };
     }
-    const accessCandidates = candidates.filter(entrance => usableAccess(entrance, assetFacts(entrance, data, input.departure_at), input));
-    if (!accessCandidates.length) return { routes: {}, recommended: null, reasons: [
+    const reachable = reachableNodes(prepared.graph, [prepared.origin]);
+    const reachableEntrances = candidates.filter(entrance => reachable.has(prepared.assets.get(entrance.id)!));
+    if (!reachableEntrances.length) return { routes: {}, recommended: null, issue: { kind: 'connection' },
+        reasons: ['There is no mapped pedestrian connection from this start to the destination access points.'] };
+    const accessCandidates = reachableEntrances.filter(entrance => usableAccess(entrance, assetFacts(entrance, data, input.departure_at), input));
+    if (!accessCandidates.length) return { routes: {}, recommended: null, issue: { kind: 'entrance' }, reasons: [
         'The mapped access points do not meet your selected entrance requirements. Try another place or review the recorded entrances.',
     ] };
     const speed = input.needs.speed_mps ?? PROFILES[input.profile].speed_mps;
@@ -410,14 +415,16 @@ export function planJourney(nodes: PathNode[], edges: PathEdge[], data: WalkingD
             + r.total_min + (slot === 'night' ? r.dark_m / 10 : r.uncovered_m / (feelsLike != null && feelsLike >= 32 ? 20 : 50));
         return score(ra) - score(rb);
     })[0] ?? null;
-    const reasons = available.length ? [] : searchLimited ? ['The route search could not complete for these settings. No recommendation is available; try a smaller trip budget.'] : closedAtArrival ? ['The matching routes arrive outside the access points’ opening hours. Choose a different departure time or place.'] : [
-        input.needs.require_rests ? `No connected route meets your ${input.needs.rest_interval_min}-minute interval with verified rest facilities.`
-            : 'No connected route meets the selected needs and walking budget, or its access points are closed.',
-        ...(input.needs.verified_only ? ['Current verification records are required for the path, crossings and access point.'] : []),
+    if (available.length) return { routes, recommended, reasons: [] };
+    if (searchLimited) return { routes, recommended, reasons: ['The route search reached its limit. Try a shorter trip budget or a closer starting point.'] };
+    if (closedAtArrival) return { routes, recommended, issue: { kind: 'closed' },
+        reasons: ['Your estimated arrival is outside the opening hours of the destination or its entrance.'] };
+    const reasons = [input.needs.require_rests ? `The planner needs a verified rest spot within each ${input.needs.rest_interval_min}-minute stretch.`
+        : input.needs.verified_only ? 'The planner needs current checks for the paths, crossings and arrival point.'
+        : `No route fits your ${input.needs.budget_min}-minute budget and walking needs.`,
         ...(input.needs.min_clear_width_m !== null || input.needs.require_tactile_crossings || input.needs.require_audible_crossings
-            ? ['Some paths or crossings may lack recorded width, tactile paving or audible signal information.'] : []),
-    ];
-    return { routes, recommended, reasons };
+            ? ['Some paths or crossings may lack recorded width, tactile paving or audible signal information.'] : [])];
+    return { routes, recommended, issue: { kind: 'needs' }, reasons };
 }
 
 export function reachablePlaces(nodes: PathNode[], edges: PathEdge[], data: WalkingData,
@@ -472,7 +479,7 @@ export function planReturnWalk(nodes: PathNode[], edges: PathEdge[], data: Walki
     const input: PlanningInput = { ...request, destination, needs };
     const extended = { ...data, assets: [...data.assets, ...turns] };
     const prepared = prepare(nodes, edges, extended, input, solar);
-    if (!prepared) return { routes: {}, recommended: null, reasons: ['Your start is more than 50 metres from a mapped pedestrian path.'] };
+    if (!prepared) return { routes: {}, recommended: null, issue: { kind: 'start' }, reasons: ['Your start is more than 50 metres from a mapped pedestrian path.'] };
     const routes: JourneyPlan['routes'] = {};
     const slot = slotForHour(malaysiaHour(request.departure_at));
     for (const mode of modes.filter(m => m !== 'sheltered' && !(slot === 'night' && m === 'coolest'))) {
