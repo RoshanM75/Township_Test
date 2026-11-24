@@ -42,3 +42,6 @@ npm run build:pages
 ```
 
 The walking dataset fingerprint is independent of the import timestamp. A populated database rejects a different walking dataset so existing reports and checks retain their original targets. Elmina's graph and example destinations are separate and remain unchanged. See [pilot setup and GIS review](../../docs/pasar-seni-pilot.md).
+## Central KL coverage beyond the original pilot
+
+The committed expansion adds five neighbourhoods, further walking paths, a wider 2D and 3D basemap, and additional transit and venue records. The base bundle remains the original Pasar Seni source revision. [Coverage, data sources and rebuild instructions](../../docs/central-kl-expansion.md)

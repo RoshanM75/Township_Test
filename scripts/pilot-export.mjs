@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { mkdir,writeFile,readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
+import { gunzipSync } from 'node:zlib';
 import { pointInPilot } from '../lib/pilots.ts';
 import { gisLayers } from './pilot-snapshot.mjs';
 import { attachLocalDirectory } from './pilot-place-directory.mjs';
+import { attachKLExpansion } from './pilot-kl-expansion.mjs';
 
 /** Missing source data leaves KL pending. Corrupt or private data still stops the build. */
-export async function loadPagesPilot(path,area='pasar-seni'){
+export async function loadPagesPilot(path,area='pasar-seni',{ includeExpansion = true } = {}){
     let contents;
     try{contents=await readFile(path,'utf8');}
     catch(error){if(error.code==='ENOENT')return null;throw error;}
@@ -14,7 +16,10 @@ export async function loadPagesPilot(path,area='pasar-seni'){
     validatePilotSnapshot(bundle,area);
     const folder = dirname(path);
     const readOptional = async file => {
-        try { return JSON.parse(await readFile(resolve(folder, file), 'utf8')); }
+        try {
+            const data = await readFile(resolve(folder, file));
+            return JSON.parse(file.endsWith('.gz') ? gunzipSync(data) : data);
+        }
         catch (error) { if (error.code === 'ENOENT') return null; throw error; }
     };
     let enriched = bundle;
@@ -26,6 +31,10 @@ export async function loadPagesPilot(path,area='pasar-seni'){
     }
     const directory = await readOptional('local-places.json');
     if (directory) enriched = await attachLocalDirectory(enriched, directory, folder);
+    if (area === 'pasar-seni' && includeExpansion) {
+        const expansion = await readOptional('expansion.json.gz');
+        if (expansion) enriched = attachKLExpansion(enriched, expansion);
+    }
     validatePilotSnapshot(enriched, area);
     return enriched;
 }

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile, access } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { validatePilotSnapshot } from './pilot-export.mjs';
+import { metres } from '../lib/walking-geometry.ts';
 
 const out = new URL('../out/', import.meta.url);
 const metadata = JSON.parse(await readFile(new URL('site-config.json', out), 'utf8'));
@@ -44,6 +45,12 @@ for(const area of metadata.areas){
     const context=await read('context');assert.equal(context.area_id,area);
     const mapArea = JSON.parse(await readFile(new URL(`map-area/${area}.geojson`, out), 'utf8'));
     assert.ok(mapArea.features.length, `Missing local basemap for ${area}.`);
+    for (const neighbourhood of context.neighbourhoods ?? []) {
+        const [lat, lng] = neighbourhood.coordinates;
+        assert.ok(mapArea.features.some(feature => feature.properties.kind === 'street' &&
+            feature.geometry.coordinates.some(point => metres([lng, lat], point) < 500)),
+        `Missing detailed base streets near ${neighbourhood.name}.`);
+    }
     if (area === 'um-campus') assert.ok(mapArea.features.some(feature => feature.properties.kind === 'building'), 'UM needs mapped 3D building footprints.');
     const areaGraph=await read('graph');areaCounts.push(`${area}: ${areaGraph.edges.length} pedestrian segments`);
     if(area!=='elmina'){

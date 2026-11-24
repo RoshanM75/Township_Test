@@ -9,10 +9,11 @@ export const KL_PILOT_AVAILABLE = process.env.NEXT_PUBLIC_SITE_MODE !== 'pages'
 const UM_PILOT_AVAILABLE = process.env.NEXT_PUBLIC_SITE_MODE !== 'pages'
     || process.env.NEXT_PUBLIC_UM_PILOT_AVAILABLE === 'true';
 export const DEFAULT_PILOT: PilotId = KL_PILOT_AVAILABLE ? 'pasar-seni' : UM_PILOT_AVAILABLE ? 'um-campus' : 'elmina';
+export const KL_CORE_BOUNDS: [number, number, number, number] = [3.133, 101.685, 3.157, 101.708];
 export const PILOTS = {
-    'pasar-seni': { id: 'pasar-seni' as const, name: 'Pasar Seni · Chinatown · Masjid Jamek', short_name: 'Central KL pilot',
-        description: 'Discover places, facilities and pedestrian connections around the stations and heritage streets.',
-        bounds: [3.133, 101.685, 3.157, 101.708] as [number, number, number, number],
+    'pasar-seni': { id: 'pasar-seni' as const, name: 'Central Kuala Lumpur', short_name: 'Central KL pilot',
+        description: 'Explore Pasar Seni, Masjid Jamek, Bangsar, Brickfields, Perdana Botanical Gardens, Pudu and Bukit Bintang.',
+        bounds: [3.116, 101.665, 3.162, 101.720] as [number, number, number, number],
         centre: [3.1425, 101.6955] as [number, number], origin_label: 'Pasar Seni walking start', edge_offset: 1000000000, asset_offset: 2000000000,
         role: 'pilot', district: 'W.P. Kuala Lumpur', preferred_names: ['Central Market', 'Pasar Seni', 'Petaling Street', 'Masjid Jamek', 'Jamek Mosque', 'Dataran Merdeka'],
     },
@@ -43,7 +44,10 @@ export function pilotFromParams(params: Pick<URLSearchParams, 'get'>): PilotId {
     return DESTINATIONS.some(d => d.id === params.get('destId')) ? 'elmina' : DEFAULT_PILOT;
 }
 export function pointInPilot(point: [number, number], area: PilotId) {
-    const [south,west,north,east] = PILOTS[area].bounds;
+    return pointInBounds(point, PILOTS[area].bounds);
+}
+
+export function pointInBounds(point: [number, number], [south, west, north, east]: readonly number[]) {
     return point[0]>=south && point[0]<=north && point[1]>=west && point[1]<=east;
 }
 
@@ -71,6 +75,16 @@ export interface TransitStop {
     walking_asset_id?: string;
     approach?: { lat: number; lng: number; edge_id: number; fraction: number; distance_m: number };
 }
+export interface PilotNeighbourhood {
+    id: string;
+    name: string;
+    coordinates: [number, number];
+    source_ref: string;
+    // A mapped start belongs to a real pedestrian component near the landmark.
+    start?: { coordinates: [number, number]; edge_id: number };
+    local_paths: number;
+    connected_to_core: boolean;
+}
 export interface PilotContext {
     area_id: PilotId; dataset_id: string; built_at: string;
     origin: { coordinates: [number, number]; label: string; source_ref: string };
@@ -86,4 +100,5 @@ export interface PilotContext {
     landmarks: Array<{ id: string; name: string; description: string; url: string; coordinates: [number, number] }>;
     environment: { scenes: Array<{ id: string; date: string; cloud_percent: number | null; collection: string; bbox: number[]; url: string }>; note: string };
     walking_details?: PilotWalkingDetails;
+    neighbourhoods?: PilotNeighbourhood[];
 }

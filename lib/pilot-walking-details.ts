@@ -9,7 +9,7 @@ export type PathDetails = Pick<PathEdge, 'clear_width_m' | 'has_tactile' | 'audi
 export interface PilotWalkingDetails {
     paths: Record<string, PathDetails>;
     facilities: Record<string, Record<string, ObservationValue>>;
-    shade: { model_date: string; buildings: number; crowns: number };
+    shade?: { model_date: string; buildings: number; crowns: number };
 }
 
 export function withMappedDetails(edges: PathEdge[], walking: WalkingData, context: PilotContext) {

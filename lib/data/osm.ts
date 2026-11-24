@@ -3,7 +3,7 @@ import { metres, pointAt, projectPoint } from '../walking-geometry.ts';
 import type { PathEdge, PathNode } from '../routing.ts';
 import type { WalkingAsset, ObservationValue, PlaceCategory } from '../walking.ts';
 import type { PilotId, PilotContext } from '../pilots.ts';
-import { PILOTS, pointInPilot } from '../pilots.ts';
+import { KL_CORE_BOUNDS, PILOTS, pointInBounds } from '../pilots.ts';
 
 export interface OsmElement { type: 'node'|'way'|'relation'; id: number; lat?: number; lon?: number; nodes?: number[];
     geometry?: Array<{lat:number;lon:number}>; center?:{lat:number;lon:number}; tags?:Record<string,string>;
@@ -29,7 +29,7 @@ export function preparePilotGraph(graph: {nodes:PathNode[];edges:PathEdge[]}, ra
     return {nodes:graph.nodes,edges};
 }
 
-function representative(element: OsmElement): [number,number]|null {
+export function representative(element: OsmElement): [number,number]|null {
     if(Number.isFinite(element.lat)&&Number.isFinite(element.lon))return [element.lat!,element.lon!];
     if(element.center&&Number.isFinite(element.center.lat)&&Number.isFinite(element.center.lon))return [element.center.lat,element.center.lon];
     const points=element.geometry??element.members?.flatMap(m=>m.geometry??[])??[];
@@ -50,7 +50,7 @@ function classification(t:Record<string,string>,area:PilotId): {kind:WalkingAsse
     if(t.amenity==='drinking_water')return {kind:'water',category:'other',fallback:'Mapped drinking water'};
     if(t.amenity==='shelter')return {kind:'shelter',category:'other',fallback:'Mapped shelter'};
     if(t.public_transport==='station'||t.railway==='station'||t.railway==='halt')return {kind:'transit',category:'transport',fallback:'Mapped station'};
-    if(['clinic','hospital','pharmacy','doctors','dentist'].includes(t.amenity))return {kind:'destination',category:'healthcare',fallback:'Mapped healthcare'};
+    if(['clinic','hospital','pharmacy','doctors','dentist'].includes(t.amenity)||t.healthcare==='yes')return {kind:'destination',category:'healthcare',fallback:'Mapped healthcare'};
     if(['cafe','restaurant','fast_food','food_court','marketplace'].includes(t.amenity))return {kind:'destination',category:t.amenity==='marketplace'?'shopping':'food',fallback:'Mapped food place'};
     if(t.shop)return {kind:'destination',category:'shopping',fallback:'Mapped shop'};
     if(t.leisure==='park'||t.leisure==='garden')return {kind:'destination',category:'park',fallback:'Mapped park'};
@@ -60,12 +60,20 @@ function classification(t:Record<string,string>,area:PilotId): {kind:WalkingAsse
 }
 
 /** Spatial joins create labelled approaches. They never certify physical access. */
-export function mappedAssets(raw:OsmSource, edges:PathEdge[], area:PilotId) {
+export function mappedAssets(raw:OsmSource, edges:PathEdge[], area:PilotId,
+    bounds = area === 'pasar-seni' ? KL_CORE_BOUNDS : PILOTS[area].bounds) {
     const assets:WalkingAsset[]=[];const used=new Set<string>();
     const entranceElements=raw.elements.filter(e=>e.type==='node'&&e.tags?.entrance&&e.tags.entrance!=='no');
     const buildings=raw.elements.filter(e=>e.type==='way'&&e.tags?.building&&e.geometry&&e.nodes);
-    const nearest=(p:[number,number],level?:string)=>edges.filter(e=>e.pedestrian_access!==false&&e.kind!=='street'&&(!level||!(e as PathEdge&{level?:string}).level||(e as PathEdge&{level?:string}).level===level))
-        .map(edge=>({edge,...projectPoint(edge.geometry,[p[1],p[0]])})).sort((a,b)=>a.distance-b.distance)[0];
+    const searchable = edges.filter(edge => edge.pedestrian_access !== false && edge.kind !== 'street').map(edge => {
+        const lats = edge.geometry.map(p => p[1]), lngs = edge.geometry.map(p => p[0]);
+        return { edge, bounds: [Math.min(...lats) - .001, Math.min(...lngs) - .001, Math.max(...lats) + .001, Math.max(...lngs) + .001] };
+    });
+    const nearest = (p: [number, number], level?: string) => searchable
+        .filter(item => {
+            const edgeLevel = (item.edge as PathEdge & {level?: string}).level;
+            return pointInBounds(p, item.bounds) && (!level || !edgeLevel || edgeLevel === level);
+        }).map(({edge}) => ({edge, ...projectPoint(edge.geometry, [p[1], p[0]])})).sort((a, b) => a.distance - b.distance)[0];
     const make=(element:OsmElement,p:[number,number],kind:WalkingAsset['kind'],category:PlaceCategory,name:string,key:string,parent:string|null=null):WalkingAsset=>{
         const t=element.tags??{},near=nearest(p,t.level),joined=near&&near.distance<=30?near:null;
         const properties:Record<string,ObservationValue>={osm_type:element.type,osm_id:String(element.id),...(t.opening_hours?{opening_hours:t.opening_hours}:{}),
@@ -80,7 +88,7 @@ export function mappedAssets(raw:OsmSource, edges:PathEdge[], area:PilotId) {
     };
     for(const element of raw.elements){
         const t=element.tags??{},classificationResult=classification(t,area),p=representative(element);
-        if(!classificationResult||!p||!pointInPilot(p,area)||['no','private'].includes(t.access))continue;
+        if(!classificationResult||!p||!pointInBounds(p,bounds)||['no','private'].includes(t.access))continue;
         if(!t.name&&!t['name:en']&&classificationResult.kind==='destination'&&!t.shop)continue;
         const {kind,category,fallback}=classificationResult,key=`osm:${element.type}:${element.id}`;
         if(used.has(key))continue;used.add(key);
@@ -99,7 +107,7 @@ export function mappedAssets(raw:OsmSource, edges:PathEdge[], area:PilotId) {
                 doors=[...doors,...subways.filter(e=>!doors.some(d=>d.id===e.id))];
             }
             assets.push(place);
-            if(doors.length){for(const door of doors){const position=representative(door);if(!position)continue;const access=make(door,position,'entrance',category,`${place.name} · ${door.tags?.ref||door.tags?.name||'mapped entrance'}`,`${key}:door:${door.id}`,place.id);
+            if(doors.length){for(const door of doors){const position=representative(door);if(!position||!pointInBounds(position,PILOTS[area].bounds))continue;const access=make(door,position,'entrance',category,`${place.name} · ${door.tags?.ref||door.tags?.name||'mapped entrance'}`,`${key}:door:${door.id}`,place.id);
                 if(!door.tags?.opening_hours&&t.opening_hours){access.properties.opening_hours=t.opening_hours;access.properties.opening_hours_source=place.source_ref;}
                 access.properties.connection_model='mapped_entrance';assets.push(access);}}
             else { const access=make(element,p,'entrance',category,`${place.name} · approximate approach`,`${key}:approach`,place.id);

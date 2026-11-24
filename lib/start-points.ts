@@ -12,6 +12,10 @@ export interface StartPoint {
 
 export function presetStartPoints(context: PilotContext, assets: WalkingAsset[], graph: Graph): StartPoint[] {
     const start: StartPoint = { id: 'area-start', label: context.origin.label, coordinates: context.origin.coordinates };
+    const nearbyStarts = (context.neighbourhoods ?? []).flatMap(neighbourhood =>
+        neighbourhood.start && graph.edges.has(neighbourhood.start.edge_id) ? [{
+            id: neighbourhood.id, label: `${neighbourhood.name} walking start`, coordinates: neighbourhood.start.coordinates,
+        }] : []);
     const nearest = nearestEdge(graph, ...start.coordinates);
     const originEdge = nearest && graph.edges.get(nearest.edge_id);
     if (!originEdge) return [start];
@@ -50,5 +54,6 @@ export function presetStartPoints(context: PilotContext, assets: WalkingAsset[],
         }
         if (options.length === 7) break;
     }
-    return options;
+    return [...options, ...nearbyStarts.filter(point => !options.some(option =>
+        option.coordinates[0] === point.coordinates[0] && option.coordinates[1] === point.coordinates[1]))];
 }

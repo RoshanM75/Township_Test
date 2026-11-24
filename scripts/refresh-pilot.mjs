@@ -1,7 +1,7 @@
 import { mkdir,readFile,writeFile,access } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { PILOTS } from '../lib/pilots.ts';
+import { KL_CORE_BOUNDS, PILOTS } from '../lib/pilots.ts';
 import { download,fileDigest,importSourceFile,gtfsFiles,csvFile,geofabrikToOverpass } from './data-download.mjs';
 import { createPilotSnapshot,gisLayers } from './pilot-snapshot.mjs';
 import { validatePilotSnapshot } from './pilot-export.mjs';
@@ -9,7 +9,7 @@ import { validatePilotSnapshot } from './pilot-export.mjs';
 const args=process.argv.slice(2),arg=(key)=>{const i=args.indexOf(key);return i<0?null:args[i+1];};
 const root=resolve(new URL('..',import.meta.url).pathname),raw=resolve(root,arg('--raw-dir')||'.local/sources/pasar-seni'),out=resolve(root,arg('--out')||'data/pasar-seni');
 await mkdir(raw,{recursive:true});
-const [south,west,north,east]=PILOTS['pasar-seni'].bounds;
+const [south,west,north,east]=KL_CORE_BOUNDS;
 const sources=[];
 async function acquire(id,name,url,file,{supplied=null,license='See source terms',essential=false,maxBytes=30000000,method='GET',body}={}){
     const path=resolve(raw,file);let metadata;
@@ -39,7 +39,7 @@ try {
     const pbf=arg('--geofabrik-pbf');
     if(pbf||args.includes('--fetch-geofabrik')){
         const path=pbf?resolve(pbf):await acquire('geofabrik','Geofabrik Malaysia/Singapore/Brunei','https://download.geofabrik.de/asia/malaysia-singapore-brunei-latest.osm.pbf','region.osm.pbf',{license:'ODbL',essential:true,maxBytes:1000000000});
-        osmPath=resolve(raw,'osm.json');await geofabrikToOverpass(path,PILOTS['pasar-seni'].bounds,osmPath);
+        osmPath=resolve(raw,'osm.json');await geofabrikToOverpass(path,KL_CORE_BOUNDS,osmPath);
         if(pbf)sources.push({id:'geofabrik',name:'Geofabrik regional extract',url:'https://download.geofabrik.de/asia/malaysia-singapore-brunei.html',license:'ODbL',status:'loaded',fetched_at:new Date().toISOString(),data_at:arg('--osm-date'),records:0,sha256:await fileDigest(path),note:'Supplied PBF clipped with osmium; preserve the original extract timestamp.'});
     }else{
         const box=`${south},${west},${north},${east}`;
@@ -58,7 +58,7 @@ try {
         const supplied=arg(`--gtfs-${key}-file`);
         if(!supplied&&!args.includes('--reuse')&&!args.includes('--offline')&&lastStatic){const delay=16000-(Date.now()-lastStatic);if(delay>0)await new Promise(r=>setTimeout(r,delay));}
         const path=await acquire(`gtfs-${key}`,`Malaysia GTFS · ${category}`,`https://api.data.gov.my/gtfs-static/prasarana?category=${category}`,`${category}.zip`,{supplied,license:'CC BY 4.0',maxBytes:60000000});lastStatic=Date.now();
-        if(path){try{inputs.gtfs[category]=await gtfsFiles(path,PILOTS['pasar-seni'].bounds);}catch(error){sources.at(-1).status='unavailable';sources.at(-1).note=`The feed could not be parsed: ${error.message}`;}}
+        if(path){try{inputs.gtfs[category]=await gtfsFiles(path,KL_CORE_BOUNDS);}catch(error){sources.at(-1).status='unavailable';sources.at(-1).note=`The feed could not be parsed: ${error.message}`;}}
     }
     const population=await acquire('dosm','DOSM district population','https://storage.dosm.gov.my/population/population_district.csv','population.csv',{supplied:arg('--population-file'),license:'Malaysia open data terms / dataset licence'});
     inputs.population=await parseOptional('dosm',population,async path=>{
