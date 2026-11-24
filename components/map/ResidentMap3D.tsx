@@ -6,13 +6,14 @@ import {
     Map as LibreMap, AttributionControl, LngLatBounds, Marker, NavigationControl, Popup,
     type GeoJSONSource, type StyleSpecification, type MapMouseEvent, type SymbolLayerSpecification,
 } from 'maplibre-gl';
-import type { Feature, FeatureCollection, LineString } from 'geojson';
+import type { Feature, FeatureCollection, LineString, Polygon } from 'geojson';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { PILOTS, type PilotId } from '@/lib/pilots';
 import { sitePath } from '@/lib/site';
 import type { EnvironmentSegment } from '@/lib/environment';
 import { DEFAULT_ORIGIN } from '@/lib/precinct';
 import { residentText } from '@/lib/resident-language';
+import { shadeLabel } from '@/lib/shade-display';
 import type { InteractiveMapProps } from './InteractiveMap';
 import { MAP_CAUTION, ROOF_COVER, ROUTE_ALTERNATIVE, ROUTE_OUTLINE, WALK_ROUTE, WALK_ROUTE_HC, mapFacilitySymbol } from './walking-map-theme';
 
@@ -38,6 +39,8 @@ function mapStyle(area: PilotId): StyleSpecification {
             conditions: { type: 'geojson', data: empty },
             routes: { type: 'geojson', data: empty },
             roof: { type: 'geojson', data: empty },
+            'cast-shadows': { type: 'geojson', data: empty },
+            'route-shade': { type: 'geojson', data: empty },
         },
         layers: [
             { id: 'ground', type: 'background', paint: { 'background-color': '#f4f0e7' } },
@@ -59,6 +62,8 @@ function mapStyle(area: PilotId): StyleSpecification {
                 paint: { 'line-color': '#928273', 'line-width': 1.2, 'line-opacity': 0.57, 'line-dasharray': [2, 2] } },
             { id: 'building-footprints', type: 'fill', source: 'area', filter: ['==', ['get', 'kind'], 'building'],
                 paint: { 'fill-color': '#ded5ca', 'fill-outline-color': '#bdb1a6' } },
+            { id: 'ground-shadows', type: 'fill', source: 'cast-shadows', minzoom: 15.5,
+                paint: { 'fill-color': '#3f4a64', 'fill-opacity': .25, 'fill-antialias': false } },
             { id: 'building-volumes', type: 'fill-extrusion', source: 'area', filter: ['==', ['get', 'kind'], 'building'], minzoom: 15, paint: {
                 'fill-extrusion-color': ['match', ['get', 'use'], 'civic', '#cbd4d5', 'commercial', '#d7cabd', '#d9d0c6'],
                 'fill-extrusion-height': ['get', 'height'], 'fill-extrusion-base': ['get', 'base'], 'fill-extrusion-opacity': 0.88,
@@ -81,6 +86,10 @@ function mapStyle(area: PilotId): StyleSpecification {
                 paint: { 'line-color': ROOF_COVER, 'line-width': 7 } },
             { id: 'route-roof-pattern', type: 'line', source: 'roof', layout: { 'line-cap': 'round' },
                 paint: { 'line-color': ROUTE_OUTLINE, 'line-width': 2, 'line-dasharray': [0.5, 2.5] } },
+            { id: 'route-shade-known', type: 'line', source: 'route-shade', filter: ['!=', ['get', 'condition'], 'unknown'],
+                layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['get', 'colour'], 'line-width': 5 } },
+            { id: 'route-shade-unknown', type: 'line', source: 'route-shade', filter: ['==', ['get', 'condition'], 'unknown'],
+                paint: { 'line-color': '#64748b', 'line-width': 5, 'line-dasharray': [1, 1.5] } },
             { id: 'street-labels', type: 'symbol', source: 'area', minzoom: 14.5,
                 filter: ['all', ['==', ['get', 'kind'], 'street'], ['has', 'name']],
                 layout: { ...labelText, 'symbol-placement': 'line', 'symbol-spacing': 250, 'text-max-angle': 35,
@@ -101,7 +110,7 @@ function mapStyle(area: PilotId): StyleSpecification {
     };
 }
 
-function popupContent(title: string, detail?: string) {
+function popupContent(title: string, detail?: string, action?: { label: string; run: () => void }) {
     const panel = document.createElement('div');
     const heading = document.createElement('strong');
     heading.textContent = title;
@@ -110,6 +119,14 @@ function popupContent(title: string, detail?: string) {
         const description = document.createElement('p');
         description.textContent = detail;
         panel.append(description);
+    }
+    if (action) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'tg-text-action';
+        button.textContent = action.label;
+        button.addEventListener('click', action.run);
+        panel.append(button);
     }
     return panel;
 }
@@ -130,6 +147,7 @@ export default function ResidentMap3D({
     area, segments, onUnavailable, startCoords = DEFAULT_ORIGIN, endCoords, endDetail, startLabel = 'Start', routes,
     activeRouteId, reports, assets, liveLocation, focusLocation, reduceMotion, highContrast,
     selectedLocation, onLocationSelect, informationLayer, routeRoof = noRoof, labelScale = 1, language = 'en',
+    solar, shadeAt, routeShade, describeAsset, onShadeReport,
 }: Props) {
     const container = useRef<HTMLDivElement>(null);
     const mapRef = useRef<LibreMap | null>(null);
@@ -224,11 +242,42 @@ export default function ResidentMap3D({
     useEffect(() => {
         const map = mapRef.current;
         if (!loaded || !map) return;
+        const source = map.getSource('cast-shadows') as GeoJSONSource;
+        if (informationLayer !== 'shade' || !solar || !shadeAt) { source.setData(empty); return; }
+        const at = Date.parse(shadeAt);
+        const update = () => {
+            const bounds = map.getBounds();
+            const rings = map.getZoom() >= 15.5 ? solar.shadowRings(at,
+                [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()]) : [];
+            source.setData({ type: 'FeatureCollection', features: rings.map<Feature<Polygon>>(ring => ({
+                type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [ring] },
+            })) });
+        };
+        update();
+        map.on('moveend', update);
+        return () => { map.off('moveend', update); };
+    }, [loaded, informationLayer, solar, shadeAt]);
+
+    useEffect(() => {
+        const map = mapRef.current;
+        if (!loaded || !map) return;
+        const stretches = informationLayer === 'shade' ? routeShade ?? [] : [];
+        const features = stretches.filter(stretch => ['sun', 'shade', 'unknown'].includes(stretch.condition)).map<Feature<LineString>>(stretch => ({
+            type: 'Feature', geometry: { type: 'LineString', coordinates: stretch.geometry },
+            properties: { condition: stretch.condition, edge: stretch.edge_id, name: shadeLabel(stretch, language),
+                colour: stretch.condition === 'sun' ? MAP_CAUTION : '#335ca3' },
+        }));
+        (map.getSource('route-shade') as GeoJSONSource).setData({ type: 'FeatureCollection', features });
+    }, [loaded, routeShade, informationLayer, language]);
+
+    useEffect(() => {
+        const map = mapRef.current;
+        if (!loaded || !map) return;
         const features = segments.map<Feature<LineString>>(segment => {
             const colour = informationLayer === 'paths' ? '#475569' : informationLayer === 'observations' ? '#5b55a1'
                 : segment.source !== 'reported' && Number(segment.value) >= 0.65 ? ROOF_COVER : MAP_CAUTION;
             return { type: 'Feature', geometry: { type: 'LineString', coordinates: segment.geometry },
-                properties: { known: segment.value !== null, colour, name: segment.name, detail: segment.detail } };
+                properties: { known: segment.value !== null, colour, name: segment.name, detail: segment.detail, edge: segment.id } };
         });
         (map.getSource('conditions') as GeoJSONSource).setData({ type: 'FeatureCollection', features });
     }, [loaded, segments, informationLayer]);
@@ -239,7 +288,7 @@ export default function ResidentMap3D({
         const markers: Marker[] = [];
         for (const asset of (assets ?? []).slice(0, 40)) {
             const symbol = mapFacilitySymbol(asset);
-            if (symbol) markers.push(pin(map, [asset.lat, asset.lng], 'asset', symbol, asset.name));
+            if (symbol) markers.push(pin(map, [asset.lat, asset.lng], 'asset', symbol, asset.name, describeAsset?.(asset).join(' · ')));
         }
         for (const report of reports ?? []) {
             const lat = report.lat ?? report.latitude, lng = report.lng ?? report.longitude;
@@ -251,7 +300,7 @@ export default function ResidentMap3D({
         if (focusLat !== undefined && focusLng !== undefined) markers.push(pin(map, [focusLat, focusLng], 'asset', '◎', residentText(language, 'Selected map point')));
         if (liveLocation) markers.push(pin(map, liveLocation, 'live', '●', 'Last recorded GPS position'));
         return () => { for (const marker of markers) marker.remove(); };
-    }, [loaded, assets, reports, startLat, startLng, startLabel, endLat, endLng, endDetail, selectedLocation, liveLocation, focusLat, focusLng, language]);
+    }, [loaded, assets, reports, startLat, startLng, startLabel, endLat, endLng, endDetail, selectedLocation, liveLocation, focusLat, focusLng, language, describeAsset]);
 
     useEffect(() => {
         const map = mapRef.current;
@@ -262,13 +311,22 @@ export default function ResidentMap3D({
                 onLocationSelect(event.lngLat.lat, event.lngLat.lng);
                 return;
             }
-            const feature = map.queryRenderedFeatures(event.point, { layers: [...layerIds, 'conditions-unknown'] })[0];
-            if (feature?.properties.name) popup.setLngLat(event.lngLat).setDOMContent(popupContent(feature.properties.name, feature.properties.detail)).addTo(map);
+            const inspected = informationLayer === 'shade' ? map.queryRenderedFeatures(event.point, {
+                layers: ['route-shade-known', 'route-shade-unknown', 'walking-conditions', 'conditions-unknown'],
+            })[0] : undefined;
+            const feature = inspected ?? map.queryRenderedFeatures(event.point, { layers: [...layerIds, 'conditions-unknown'] })[0];
+            if (!feature?.properties.name) return;
+            const edge = inspected?.properties.edge;
+            const action = onShadeReport && Number.isSafeInteger(edge) ? {
+                label: residentText(language, 'Report shade here'),
+                run: () => { popup.remove(); onShadeReport(edge, [event.lngLat.lat, event.lngLat.lng]); },
+            } : undefined;
+            popup.setLngLat(event.lngLat).setDOMContent(popupContent(feature.properties.name, feature.properties.detail, action)).addTo(map);
         };
         map.on('click', onClick);
         map.getCanvas().style.cursor = onLocationSelect ? 'crosshair' : '';
         return () => { map.off('click', onClick); popup.remove(); };
-    }, [loaded, onLocationSelect]);
+    }, [loaded, onLocationSelect, informationLayer, language, onShadeReport]);
 
     return (
         <>

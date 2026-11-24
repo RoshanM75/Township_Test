@@ -1,3 +1,5 @@
+import type { ShadeChange } from './shade-corrections.ts';
+
 /** Report fields shared by resident hazard pins and dashboard defects. */
 export interface ReportMarker {
     id?: number | string;
@@ -22,6 +24,9 @@ export interface MaintenanceDefect extends ReportMarker {
     created_at?: string;
     asset_id?: string | null;
     checked_at?: string | null;
+    observed_at?: string | null;
+    shade_change?: ShadeChange | null;
+    map_updated_at?: string | null;
     fixed_at?: string | null;
     dismissed_at?: string | null;
     responsible_team?: string | null;

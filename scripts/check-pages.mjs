@@ -45,6 +45,9 @@ for(const area of metadata.areas){
     const context=await read('context');assert.equal(context.area_id,area);
     const mapArea = JSON.parse(await readFile(new URL(`map-area/${area}.geojson`, out), 'utf8'));
     assert.ok(mapArea.features.length, `Missing local basemap for ${area}.`);
+    const solar = JSON.parse(await readFile(new URL(`map-area/${area}-shade.json`, out), 'utf8'));
+    assert.ok(solar.centre.every(Number.isFinite) && Array.isArray(solar.objects), `Invalid shade geometry for ${area}.`);
+    if (area !== 'elmina') assert.ok(solar.objects.length, `Missing mapped-height buildings for ${area}.`);
     for (const neighbourhood of context.neighbourhoods ?? []) {
         const [lat, lng] = neighbourhood.coordinates;
         assert.ok(mapArea.features.some(feature => feature.properties.kind === 'street' &&
@@ -61,6 +64,7 @@ for(const area of metadata.areas){
         }
     }
 }
+await access(new URL('planning-worker/solar-shade.js', out));
 await access(new URL('planning-worker/planning-entry.js',out));
 const entry=await readFile(new URL('planning-worker/planning-entry.js',out),'utf8');
 assert.ok(entry.includes('./planning-dispatch.js'),'The planning worker needs browser-compatible module paths.');

@@ -12,7 +12,7 @@ export type DataSource = 'audited' | 'reported' | 'modelled' | 'assumed';
 export type Profile = 'senior' | 'cane_walker' | 'wheelchair';
 export type TimeSlot = 'morning' | 'midday' | 'afternoon' | 'night';
 export type Mode = 'direct' | 'coolest' | 'sheltered' | 'safest';
-export type HazardKind = 'blocked' | 'no_ramp' | 'light_out' | 'no_shade' | 'broken_surface' | 'lift_out' | 'details_outdated';
+export type HazardKind = 'blocked' | 'no_ramp' | 'light_out' | 'no_shade' | 'broken_surface' | 'lift_out' | 'details_outdated' | 'shade_correction';
 export type HazardStatus = 'open' | 'verified' | 'fixed';
 
 export interface PathNode {
@@ -35,6 +35,7 @@ export interface PathEdge {
     kind: 'footway' | 'path' | 'pedestrian' | 'steps' | 'street' | 'crossing' | 'service';
     pedestrian_access?: boolean;
     covered?: boolean | null;
+    osm_way_id?: string | number;
     source_edge_id?: number;
     source_length_m?: number;
     cost_fraction?: number;

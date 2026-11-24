@@ -1,3 +1,5 @@
+import { SHADE_CHANGES, SHADE_RESULTS, type ShadeChange, type ShadeResult } from '../shade-corrections.ts';
+import { readSharedDeparture } from '../walk-parameters.ts';
 import type { HazardKind } from '../routing.ts';
 import { isPilot,type PilotId } from '../pilots.ts';
 
@@ -19,9 +21,11 @@ export interface NewReport {
     asset_id?: string;
     description: string;
     reported_by_proxy: boolean;
+    observed_at?: string;
+    shade_change?: ShadeChange;
 }
 
-const HAZARD_KINDS = ['blocked', 'no_ramp', 'light_out', 'no_shade', 'broken_surface', 'lift_out', 'details_outdated'];
+const HAZARD_KINDS = ['blocked', 'no_ramp', 'light_out', 'no_shade', 'broken_surface', 'lift_out', 'details_outdated', 'shade_correction'];
 
 export function validateReport(body: unknown): NewReport {
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new RequestError('A report object is required.');
@@ -48,7 +52,16 @@ export function validateReport(body: unknown): NewReport {
     if (reported_by_proxy !== undefined && typeof reported_by_proxy !== 'boolean') {
         throw new RequestError('The proxy reporting flag must be a boolean.');
     }
-    return { lat, lng, kind: kind as HazardKind, edge_id: edge_id as number | undefined,
+    let shade: Pick<NewReport, 'observed_at' | 'shade_change'> = {};
+    if (kind === 'shade_correction') {
+        const change = input.shade_change as ShadeChange;
+        const observed = readSharedDeparture(typeof input.observed_at === 'string' ? input.observed_at : null);
+        if (!edge_id || asset_id !== undefined) throw new RequestError('Choose the affected path segment for this correction.');
+        if (!SHADE_CHANGES.includes(change)) throw new RequestError('Choose what changed about the shade or roof cover.');
+        if (!observed || Date.parse(observed) > Date.now() + 60000) throw new RequestError('Enter the date and time you observed the change.');
+        shade = { observed_at: observed, shade_change: change };
+    }
+    return { lat, lng, kind: kind as HazardKind, edge_id: edge_id as number | undefined, ...shade,
         description: (description as string | undefined)?.trim() ?? '', reported_by_proxy: reported_by_proxy === true, ...(typeof asset_id === 'string' ? { asset_id } : {}), ...(isPilot(area_id)?{area_id}:{}) };
 }
 
@@ -58,7 +71,7 @@ export function validateReportId(id: string): string {
 }
 
 export function validateReportCheck(value: unknown) {
-    const input = value as { team?: unknown; note?: unknown; dismiss?: unknown } | null;
+    const input = value as { team?: unknown; note?: unknown; dismiss?: unknown; shade_result?: unknown } | null;
     if (typeof input?.team !== 'string' || !input.team.trim() || input.team.trim().length > 120) {
         throw new RequestError('Enter the responsible team.');
     }
@@ -66,5 +79,7 @@ export function validateReportCheck(value: unknown) {
         throw new RequestError('Describe what the team checked in 600 characters or fewer.');
     }
     if (input.dismiss !== undefined && typeof input.dismiss !== 'boolean') throw new RequestError('Choose a supported review outcome.');
-    return { team: input.team.trim(), note: input.note.trim(), dismiss: input.dismiss === true };
+    const result = input.shade_result as ShadeResult | undefined;
+    if (result !== undefined && !SHADE_RESULTS.includes(result)) throw new RequestError('Choose the confirmed shade or cover condition.');
+    return { team: input.team.trim(), note: input.note.trim(), dismiss: input.dismiss === true, ...(result ? { shade_result: result } : {}) };
 }

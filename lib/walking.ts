@@ -1,4 +1,5 @@
 import type { Mode, Profile, RouteResult } from './routing.ts';
+import type { RouteShade } from './route-shade.ts';
 import type { PilotId } from './pilots.ts';
 
 export type VerificationTarget = 'path' | 'crossing' | 'entrance' | 'facility';
@@ -99,6 +100,7 @@ export interface JourneyStep {
     distance_m: number;
     start_min: number;
     end_min: number;
+    wait_s?: number;
 }
 
 export interface JourneyRoute extends RouteResult {
@@ -114,6 +116,7 @@ export interface JourneyRoute extends RouteResult {
     longest_without_rest_min: number;
     uncovered_m: number;
     unsheltered_m: number;
+    sun_exposure?: RouteShade;
     unverified_crossings: number;
     unchecked_segments: number;
     evidence_coverage: number;

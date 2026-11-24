@@ -1,0 +1,193 @@
+import type { LngLat } from './walking-geometry.ts';
+
+export interface ShadeObject {
+    ring: LngLat[];
+    height: number;
+    base: number;
+}
+
+export interface ShadeDataset {
+    centre: LngLat;
+    objects: ShadeObject[];
+    non_ground_ways?: string[];
+}
+
+export type SunCondition = 'sun' | 'shade' | 'covered' | 'night' | 'unknown';
+export type ShadeSource = 'modelled' | 'checked' | 'mapped' | 'unknown';
+export interface ShadeReading { condition: SunCondition; source: ShadeSource }
+export type ShadeBounds = [west: number, south: number, east: number, north: number];
+
+const radians = Math.PI / 180;
+const cellSize = 80;
+// Long shadows at very low sun angles are particularly sensitive to missing heights and terrain.
+const minimumElevation = .12;
+const coverageRadius = 180;
+
+/** NOAA solar position approximation. Components are east, north and up. */
+export function sunVector(date: string, hour: number, [lng, lat]: LngLat) {
+    const yearStart = Date.parse(`${date.slice(0, 4)}-01-01`);
+    const day = (Date.parse(date) - yearStart) / 86400000;
+    const g = 2 * Math.PI / 365 * (day + (hour - 12) / 24);
+    const equation = 229.18 * (.000075 + .001868 * Math.cos(g) - .032077 * Math.sin(g)
+        - .014615 * Math.cos(2 * g) - .040849 * Math.sin(2 * g));
+    const declination = .006918 - .399912 * Math.cos(g) + .070257 * Math.sin(g)
+        - .006758 * Math.cos(2 * g) + .000907 * Math.sin(2 * g)
+        - .002697 * Math.cos(3 * g) + .00148 * Math.sin(3 * g);
+    const angle = ((hour * 60 + equation + 4 * lng - 480) / 4 - 180) * radians;
+    const latitude = lat * radians;
+    return [
+        -Math.cos(declination) * Math.sin(angle),
+        Math.cos(latitude) * Math.sin(declination) - Math.sin(latitude) * Math.cos(declination) * Math.cos(angle),
+        Math.sin(latitude) * Math.sin(declination) + Math.cos(latitude) * Math.cos(declination) * Math.cos(angle),
+    ] as const;
+}
+
+function vectorAt(instant: number, centre: LngLat) {
+    const local = new Date(instant + 8 * 3600000);
+    const hour = local.getUTCHours() + local.getUTCMinutes() / 60;
+    return sunVector(local.toISOString().slice(0, 10), hour, centre);
+}
+
+function boundsOf(ring: LngLat[]): ShadeBounds {
+    let west = Infinity, south = Infinity, east = -Infinity, north = -Infinity;
+    for (const [x, y] of ring) {
+        west = Math.min(west, x);
+        south = Math.min(south, y);
+        east = Math.max(east, x);
+        north = Math.max(north, y);
+    }
+    return [west, south, east, north];
+}
+
+function overlaps(a: ShadeBounds, b: ShadeBounds) {
+    return a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1];
+}
+
+function inside([x, y]: LngLat, ring: LngLat[]) {
+    let hit = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const [a, b] = ring[i], [c, d] = ring[j];
+        if ((b > y) !== (d > y) && x < (c - a) * (y - b) / (d - b) + a) hit = !hit;
+    }
+    return hit;
+}
+
+// Check the section of the ray above the base and below the top of an object.
+function intersects(ring: LngLat[], a: LngLat, b: LngLat) {
+    if (inside(a, ring) || inside(b, ring)) return true;
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const [x, y] = ring[j], sx = ring[i][0] - x, sy = ring[i][1] - y;
+        const cross = dx * sy - dy * sx;
+        if (Math.abs(cross) < 1e-9) continue;
+        const ox = x - a[0], oy = y - a[1];
+        const t = (ox * sy - oy * sx) / cross, u = (ox * dy - oy * dx) / cross;
+        if (t >= 0 && t <= 1 && u >= 0 && u <= 1) return true;
+    }
+    return false;
+}
+
+const models = new WeakMap<ShadeDataset, ReturnType<typeof buildModel>>();
+export function solarModel(dataset: ShadeDataset) {
+    const existing = models.get(dataset);
+    if (existing) return existing;
+    const model = buildModel(dataset);
+    models.set(dataset, model);
+    return model;
+}
+export type SolarModel = ReturnType<typeof solarModel>;
+
+function buildModel({ centre, objects, non_ground_ways }: ShadeDataset) {
+    const nonGroundWays = new Set(non_ground_ways);
+    const lonScale = 111320 * Math.cos(centre[1] * radians);
+    const latScale = 110574;
+    const project = ([lng, lat]: LngLat): LngLat => [(lng - centre[0]) * lonScale, (lat - centre[1]) * latScale];
+    const unproject = ([x, y]: LngLat): LngLat => [x / lonScale + centre[0], y / latScale + centre[1]];
+    const shapes = objects.map(object => {
+        const ring = object.ring.map(project);
+        return { ...object, ring, bounds: boundsOf(ring) };
+    });
+    type Shape = (typeof shapes)[number];
+    const bucket = (v: number) => Math.floor(v / cellSize);
+    const key = (x: number, y: number) => `${x}:${y}`;
+    const cells = new Map<string, Shape[]>();
+    const nearby = new Set<string>();
+    let maxHeight = 0;
+    for (const object of shapes) {
+        const [w, s, e, n] = object.bounds;
+        maxHeight = Math.max(maxHeight, object.height);
+        for (let x = bucket(w); x <= bucket(e); x++) for (let y = bucket(s); y <= bucket(n); y++) {
+            const id = key(x, y);
+            const list = cells.get(id);
+            if (list) list.push(object);
+            else cells.set(id, [object]);
+        }
+        for (let x = bucket(w - coverageRadius); x <= bucket(e + coverageRadius); x++) {
+            for (let y = bucket(s - coverageRadius); y <= bucket(n + coverageRadius); y++) nearby.add(key(x, y));
+        }
+    }
+    const positions = new Map<number, ReturnType<typeof vectorAt>>();
+    function position(at: number) {
+        const minute = Math.floor(at / 60000);
+        const cached = positions.get(minute);
+        if (cached) return cached;
+        if (positions.size >= 512) positions.clear();
+        const sun = vectorAt(minute * 60000, centre);
+        positions.set(minute, sun);
+        return sun;
+    }
+    function atPoint(coordinate: LngLat, at: number): ShadeReading {
+        if (!Number.isFinite(at)) return { condition: 'unknown', source: 'unknown' };
+        const [east, north, up] = position(at);
+        if (up <= 0) return { condition: 'night', source: 'modelled' };
+        if (up < minimumElevation || !maxHeight) return { condition: 'unknown', source: 'unknown' };
+        const [x, y] = project(coordinate);
+        const dx = east / up, dy = north / up;
+        const rayPoint = (height: number): LngLat => [x + height * dx, y + height * dy];
+        let col = bucket(x), row = bucket(y);
+        const localData = nearby.has(key(col, row));
+        // Traverse only the cells intersected by the ray towards the sun.
+        const stepX = Math.sign(dx), stepY = Math.sign(dy);
+        const deltaX = dx === 0 ? Infinity : cellSize / Math.abs(dx);
+        const deltaY = dy === 0 ? Infinity : cellSize / Math.abs(dy);
+        let nextX = dx === 0 ? Infinity : ((col + Number(dx > 0)) * cellSize - x) / dx;
+        let nextY = dy === 0 ? Infinity : ((row + Number(dy > 0)) * cellSize - y) / dy;
+        const seen = new Set<Shape>();
+        for (;;) {
+            for (const object of cells.get(key(col, row)) ?? []) {
+                if (seen.has(object)) continue;
+                seen.add(object);
+                const start = rayPoint(object.base), end = rayPoint(object.height);
+                if (overlaps(boundsOf([start, end]), object.bounds) && intersects(object.ring, start, end)) {
+                    return { condition: 'shade', source: 'modelled' };
+                }
+            }
+            if (Math.min(nextX, nextY) > maxHeight) break;
+            if (nextX < nextY) { col += stepX; nextX += deltaX; }
+            else { row += stepY; nextY += deltaY; }
+        }
+        return localData ? { condition: 'sun', source: 'modelled' } : { condition: 'unknown', source: 'unknown' };
+    }
+    function shadowRings(at: number, bounds: ShadeBounds): LngLat[][] {
+        if (!Number.isFinite(at)) return [];
+        const [east, north, up] = position(at);
+        if (up < minimumElevation) return [];
+        const [w, s] = project([bounds[0], bounds[1]]), [e, n] = project([bounds[2], bounds[3]]);
+        const dx = -east / up, dy = -north / up;
+        const rings: LngLat[][] = [];
+        for (const { ring, height, base, bounds: [left, bottom, right, top] } of shapes) {
+            if (!overlaps([left + Math.min(base * dx, height * dx), bottom + Math.min(base * dy, height * dy),
+                right + Math.max(base * dx, height * dx), top + Math.max(base * dy, height * dy)], [w, s, e, n])) continue;
+            const atHeight = (h: number) => ring.map(([x, y]) => unproject([x + h * dx, y + h * dy]));
+            const lower = atHeight(base), upper = atHeight(height);
+            rings.push([...upper, upper[0]]);
+            if (base === height) continue;
+            for (let i = 0; i < ring.length; i++) {
+                const next = (i + 1) % ring.length;
+                rings.push([lower[i], lower[next], upper[next], upper[i], lower[i]]);
+            }
+        }
+        return rings;
+    }
+    return { atPoint, shadowRings, isGroundWay: (id: string | number | undefined) => !nonGroundWays.has(String(id)) };
+}

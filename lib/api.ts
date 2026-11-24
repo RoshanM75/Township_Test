@@ -1,4 +1,5 @@
 import type { PathNode, PathEdge, HazardReport, HazardKind } from './routing';
+import type { ShadeChange, ShadeResult } from './shade-corrections';
 import type { MaintenanceDefect } from './types';
 import type { Assignment, OperatorActivity, OperatorTarget, CoverageRow, Responsibility } from './operator';
 import type { WalkingData } from './walking';
@@ -25,6 +26,8 @@ export interface ReportInput {
     asset_id?: string;
     description?: string;
     reported_by_proxy?: boolean;
+    observed_at?: string;
+    shade_change?: ShadeChange;
 }
 
 async function request<T>(url: string, options?: RequestInit,area?:PilotId): Promise<T> {
@@ -60,7 +63,7 @@ export const submitReport = (report: ReportInput) => request<{ hazard: HazardRep
 const reviewerHeaders = (key: string) => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${key}` });
 export const markReportFixed = (id: string, area: PilotId, key: string) => request<{ report: MaintenanceDefect }>(
     `/api/reports/${encodeURIComponent(id)}/fix`, { method: 'POST', headers: reviewerHeaders(key) }, area);
-export const checkReport = (id: string, area: PilotId, key: string, input: { team: string; note: string; dismiss?: boolean }) =>
+export const checkReport = (id: string, area: PilotId, key: string, input: { team: string; note: string; dismiss?: boolean; shade_result?: ShadeResult }) =>
     request<{ report: MaintenanceDefect }>(`/api/reports/${encodeURIComponent(id)}/check`,
         { method: 'POST', headers: reviewerHeaders(key), body: JSON.stringify(input) }, area);
 

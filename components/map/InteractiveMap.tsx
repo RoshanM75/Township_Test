@@ -5,7 +5,7 @@ import type { CSSProperties } from 'react';
 import type { ReportMarker } from '@/lib/types';
 import type { WalkingAsset, VerificationRecord } from '@/lib/walking';
 import type { PathEdge } from '@/lib/routing';
-import { environmentSegments, environmentCoverage, type EnvironmentLayer } from '@/lib/environment';
+import { environmentSegments, environmentCoverage, type EnvironmentLayer, type EnvironmentSegment } from '@/lib/environment';
 import { DEFAULT_ORIGIN } from '@/lib/precinct';
 import { residentText, type ResidentLanguage } from '@/lib/resident-language';
 import { MAP_CAUTION, ROOF_COVER, ROUTE_ALTERNATIVE, ROUTE_OUTLINE, WALK_ROUTE, WALK_ROUTE_HC, mapFacilitySymbol } from './walking-map-theme';
@@ -15,6 +15,9 @@ import type { FeatureCollection } from 'geojson';
 import 'leaflet/dist/leaflet.css';
 import './resident-map.css';
 import { Plus, Minus, Route as RouteIcon, Layers } from 'lucide-react';
+import type { ShadeStretch } from '@/lib/route-shade';
+import type { SolarModel } from '@/lib/solar-shade';
+import { shadeLabel } from '@/lib/shade-display';
 
 interface RouteItem {
     id: string;
@@ -48,6 +51,12 @@ export interface InteractiveMapProps {
     labelScale?: number;
     language?: ResidentLanguage;
     routeRoof?: [number, number][][];
+    routeShade?: ShadeStretch[];
+    shadeAt?: string;
+    solar?: SolarModel;
+    conditionSegments?: EnvironmentSegment[];
+    describeAsset?: (asset: WalkingAsset) => string[];
+    onShadeReport?: (id: number, point?: [number, number]) => void;
 
     /**
      * Admin dashboard mode. When `pins` is given the map shows numbered, ranked defect pins
@@ -313,6 +322,7 @@ export default function InteractiveMap({
     selectedLocation,
     environment,
     informationLayer,
+    conditionSegments, routeShade, describeAsset, onShadeReport,
     showLayerControls = true,
     localBasemap,
     onInformationLayerChange,
@@ -327,8 +337,8 @@ export default function InteractiveMap({
     const [localLayer, setLocalLayer] = useState<EnvironmentLayer | 'routes'>('routes');
     const layer = informationLayer ?? localLayer;
     const layerEdges = environment?.edges, layerRecords = environment?.records, layerTime = environment?.at;
-    const segments = useMemo(() => layerEdges && layerRecords && layerTime && layer !== 'routes' ? environmentSegments(layerEdges, layerRecords, layerTime, layer) : [],
-        [layerEdges, layerRecords, layerTime, layer]);
+    const segments = useMemo(() => conditionSegments ?? (layerEdges && layerRecords && layerTime && layer !== 'routes'
+        ? environmentSegments(layerEdges, layerRecords, layerTime, layer) : []), [conditionSegments, layerEdges, layerRecords, layerTime, layer]);
     const coverage = environmentCoverage(segments);
 
     /* ----- Walk mode ----- */
@@ -440,7 +450,9 @@ export default function InteractiveMap({
                         pathOptions={{ color, weight: unknown ? 2 : 4, opacity: unknown ? .35 : .8,
                             dashArray: unknown ? '3 7' : segment.source === 'checked' ? undefined : '9 5' }}>
                         <Tooltip sticky><strong>{segment.name}</strong><p>{segment.detail}</p></Tooltip>
-                        <Popup {...popupProps}><strong>{segment.name}</strong><p>{segment.detail}</p></Popup>
+                        <Popup {...popupProps}><strong>{segment.name}</strong><p>{segment.detail}</p>
+                            {layer === 'shade' && onShadeReport && <button type="button" className="tg-text-action" onClick={() => onShadeReport(segment.id)}>{residentText(language, 'Report shade here')}</button>}
+                        </Popup>
                     </Polyline>;
                 })}
                 {selectedLocation && <Marker position={selectedLocation} icon={assetIcon('◎')}><Popup>{residentText(language, 'Incident location')}</Popup></Marker>}
@@ -448,7 +460,7 @@ export default function InteractiveMap({
                 {assets.map(asset => mapFacilitySymbol(asset) && <Marker key={`asset:${asset.id}`} position={[asset.lat, asset.lng]} icon={assetIcon(mapFacilitySymbol(asset))}
                     eventHandlers={{ add: ariaLabelOnAdd(asset.name) }}>
                     <Tooltip>{asset.name}</Tooltip>
-                    <Popup><strong>{asset.name}</strong><p>{asset.kind === 'rest' ? 'Mapped seating / rest facility' : asset.kind === 'entrance' ? 'Mapped access point' : asset.kind}</p><p>Source: {asset.source}. See route details and verification records for current checks.</p></Popup>
+                    <Popup><strong>{asset.name}</strong>{describeAsset ? describeAsset(asset).map(line => <p key={line}>{line}</p>) : <p>{asset.kind}</p>}</Popup>
                 </Marker>)}
 
                 <MapBehavior
@@ -524,6 +536,18 @@ export default function InteractiveMap({
                             pathOptions={{ color: ROOF_COVER, weight: 7, lineCap: 'round' }} />)}
                         {routeRoof.map((line, index) => <Polyline key={`roof-pattern:${index}`} positions={line} interactive={false}
                             pathOptions={{ color: ROUTE_OUTLINE, weight: 2, dashArray: '1 5', lineCap: 'round' }} />)}
+
+                        {layer === 'shade' && routeShade?.filter(stretch => stretch.condition === 'sun' || stretch.condition === 'unknown' || stretch.condition === 'shade')
+                            .map((stretch, index) => <Polyline key={`route-shade:${index}`}
+                                positions={stretch.geometry.map(([lng, lat]) => [lat, lng])}
+                                pathOptions={{ color: stretch.condition === 'sun' ? MAP_CAUTION : stretch.condition === 'unknown' ? '#64748b' : '#335ca3',
+                                    weight: 5, dashArray: stretch.condition === 'unknown' ? '3 5' : undefined }}>
+                                <Popup {...popupProps}><strong>{shadeLabel(stretch, language)}</strong>
+                                    {stretch.edge_id !== undefined && onShadeReport && <button type="button" className="tg-text-action" onClick={() => {
+                                        const [lng, lat] = stretch.geometry[Math.floor(stretch.geometry.length / 2)];
+                                        onShadeReport(stretch.edge_id!, [lat, lng]);
+                                    }}>{residentText(language, 'Report shade here')}</button>}</Popup>
+                            </Polyline>)}
 
                         {/* Problems reported by residents (drawn under the start and destination pins) */}
                         {hazardGroups.map((g) => (

@@ -163,6 +163,9 @@ ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS checked_at TIMESTAMPTZ;
 ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS fixed_at TIMESTAMPTZ;
 ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS responsible_team TEXT;
 ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS review_note TEXT;
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS observed_at TIMESTAMPTZ;
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS shade_change TEXT CHECK (shade_change IN ('missing_tree', 'removed_awning', 'shade_difference'));
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS map_updated_at TIMESTAMPTZ;
 ALTER TABLE hazard_reports ALTER COLUMN edge_id DROP NOT NULL;
 ALTER TABLE defect_reports ALTER COLUMN edge_id DROP NOT NULL;
 DO $$
@@ -175,10 +178,10 @@ END $$;
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'hazard_reports_kind_check'
-        AND conrelid = 'hazard_reports'::regclass AND strpos(pg_get_constraintdef(oid),'lift_out') > 0) THEN
+        AND conrelid = 'hazard_reports'::regclass AND strpos(pg_get_constraintdef(oid),'shade_correction') > 0) THEN
         ALTER TABLE hazard_reports DROP CONSTRAINT IF EXISTS hazard_reports_kind_check;
         ALTER TABLE hazard_reports ADD CONSTRAINT hazard_reports_kind_check
-            CHECK (kind IN ('blocked', 'no_ramp', 'light_out', 'no_shade', 'broken_surface', 'lift_out', 'details_outdated'));
+            CHECK (kind IN ('blocked', 'no_ramp', 'light_out', 'no_shade', 'broken_surface', 'lift_out', 'details_outdated', 'shade_correction'));
     END IF;
 END $$;
 

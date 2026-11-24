@@ -1,6 +1,6 @@
 import 'server-only';
 import { getPool } from './postgres.ts';
-import { RequestError, type NewReport } from './validation.ts';
+import { RequestError, type NewReport, type validateReportCheck } from './validation.ts';
 import { estimateDefectCost } from '../scoring.ts';
 import type { HazardKind } from '../routing.ts';
 import type { PilotId } from '../pilots.ts';
@@ -13,6 +13,7 @@ const PROBLEMS: Record<HazardKind, { category: string; severity: 'blocker' | 'co
     blocked: { category: 'Access Barrier', severity: 'blocker', label: 'Path is blocked' },
     no_ramp: { category: 'Universal Design', severity: 'blocker', label: 'No ramp at the kerb' },
     light_out: { category: 'Safety Electrical', severity: 'comfort', label: 'Streetlight is not working' },
+    shade_correction: { category: 'Shade map correction', severity: 'comfort', label: 'Shade map correction' },
     no_shade: { category: 'Shade Infrastructure', severity: 'comfort', label: 'No shade here' },
     broken_surface: { category: 'Pavement Renewal', severity: 'comfort', label: 'Pavement is broken' },
     lift_out: { category: 'Access Barrier', severity: 'blocker', label: 'Lift is out of service' },
@@ -45,7 +46,7 @@ export async function readHazards(area: PilotId = 'elmina') {
 
 const REPORT_FIELDS = `id::text, hazard_report_id::text, edge_id::float8 AS edge_id,
     lat, lng, kind, description, category, severity, location_name, estimated_cost_rm,
-    reported_by_proxy, status, created_at, asset_id::text, checked_at, fixed_at, dismissed_at, responsible_team, review_note`;
+    reported_by_proxy, status, created_at, asset_id::text, checked_at, fixed_at, dismissed_at, responsible_team, review_note, observed_at, shade_change, map_updated_at`;
 
 const OPERATOR_REPORT_FIELDS = `${REPORT_FIELDS}, due_on::text, work_order_ref, assignment_version`;
 
@@ -74,11 +75,12 @@ export async function createReport(report: NewReport) {
         const { rows } = await client.query<{ id: string; name: string | null; length_m: number; is_crossing: boolean }>(`
             SELECT id::text, name, length_m, is_crossing FROM path_edges
             WHERE pedestrian_access AND ($3::bigint IS NULL OR id = $3)
-              AND area_id=$4 AND ST_DWithin(geom::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, 150)
+              AND area_id=$4 AND ST_DWithin(geom::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, $5)
             ORDER BY ST_Distance(geom::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography)
-            LIMIT 1 FOR SHARE`, [lng, lat, asset ? asset.edge_id : report.edge_id ?? null, area]);
+            LIMIT 1 FOR SHARE`, [lng, lat, asset ? asset.edge_id : report.edge_id ?? null, area, report.kind === 'shade_correction' ? 30 : 150]);
         const edge = rows[0];
-        if (!edge && !asset) throw new RequestError('Choose a location within 150 metres of a mapped footpath.', 422);
+        if (!edge && !asset) throw new RequestError(report.kind === 'shade_correction'
+            ? 'Choose a point along the affected path segment.' : 'Choose a location within 150 metres of a mapped footpath.', 422);
         const problem = PROBLEMS[report.kind];
         const location = asset?.name || edge?.name || `${edge?.is_crossing ? 'Crossing' : 'Walkway'} #${edge?.id}`;
         const description = report.description || `${problem.label} reported on ${location}`;
@@ -90,12 +92,12 @@ export async function createReport(report: NewReport) {
         [edge?.id ?? null, lat, lng, report.kind, area, asset?.id ?? null]);
         const { rows: defects } = await client.query(`INSERT INTO defect_reports
             (hazard_report_id, edge_id, lat, lng, kind, description, category, severity, location_name,
-             estimated_cost_rm, reported_by_proxy, area_id, asset_id, responsible_team, assignment_version)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+             estimated_cost_rm, reported_by_proxy, area_id, asset_id, responsible_team, assignment_version, observed_at, shade_change)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
             RETURNING ${REPORT_FIELDS}`,
         [hazards[0].id, edge?.id ?? null, lat, lng, report.kind, description, problem.category, problem.severity, location,
-            report.kind === 'details_outdated' || report.kind === 'lift_out' ? 0 : estimateDefectCost(report.kind, edge?.length_m),
-            report.reported_by_proxy, area, asset?.id ?? null, responsibility?.team ?? null, responsibility ? 1 : 0]);
+            report.kind === 'details_outdated' || report.kind === 'lift_out' || report.kind === 'shade_correction' ? 0 : estimateDefectCost(report.kind, edge?.length_m),
+            report.reported_by_proxy, area, asset?.id ?? null, responsibility?.team ?? null, responsibility ? 1 : 0, report.observed_at ?? null, report.shade_change ?? null]);
         if (responsibility) await recordAssignment(client, { ...defects[0], assignment_version: 1 }, 'responsibility');
         await client.query('COMMIT');
         return { hazard: hazards[0], report: defects[0] };
@@ -107,7 +109,7 @@ export async function createReport(report: NewReport) {
     }
 }
 
-export async function reviewReport(id: string, area: PilotId, check?: { team: string; note: string; dismiss: boolean }) {
+export async function reviewReport(id: string, area: PilotId, check?: ReturnType<typeof validateReportCheck>) {
     const client = await getPool().connect();
     try {
         await client.query('BEGIN');
@@ -119,12 +121,26 @@ export async function reviewReport(id: string, area: PilotId, check?: { team: st
             return old;
         }
         if (!check && !old.checked_at) throw new RequestError('Check the report before marking it fixed.', 409);
+        const shadeReview = check && !check.dismiss && old.kind === 'shade_correction';
+        if (shadeReview) {
+            if (!check.shade_result || !old.observed_at || !old.edge_id) throw new RequestError('Choose the shade or cover condition you checked.');
+            const { rows: [target] } = await client.query<{ is_crossing: boolean }>(
+                'SELECT is_crossing FROM path_edges WHERE id=$1 AND area_id=$2 FOR SHARE', [old.edge_id, area]);
+            if (!target) throw new RequestError('The reported segment is unavailable.', 409);
+            const attributes = check.shade_result === 'roof_removed' ? { covered: false } : { shade_observed: Number(check.shade_result === 'shade') };
+            await client.query(`INSERT INTO verification_records
+                (target_type,target_id,status,observed_at,valid_until,reviewer,method,source_ref,notes,attributes,area_id)
+                VALUES ($1,$2,'verified',$3,GREATEST($3::timestamptz,NOW()) + $4::interval,$5,'operator_record',$6,$7,$8,$9)`,
+            [target.is_crossing ? 'crossing' : 'path', old.edge_id, old.observed_at,
+                check.shade_result === 'roof_removed' ? '90 days' : '30 days', check.team, `report:${id}`, check.note, JSON.stringify(attributes), area]);
+        }
         const assign = Boolean(check && !old.responsible_team);
         const { rows } = check
             ? await client.query<MaintenanceDefect>(`UPDATE defect_reports SET checked_at=NOW(), responsible_team=COALESCE(responsible_team,$2), review_note=$3,
                 status=CASE WHEN $4 THEN 'fixed' ELSE status END, dismissed_at=CASE WHEN $4 THEN NOW() ELSE NULL END,
-                assignment_version=assignment_version + CASE WHEN $5 THEN 1 ELSE 0 END
-                WHERE id=$1 RETURNING ${OPERATOR_REPORT_FIELDS}`, [id, check.team, check.note, check.dismiss, assign])
+                assignment_version=assignment_version + CASE WHEN $5 THEN 1 ELSE 0 END,
+                map_updated_at=CASE WHEN $6 THEN NOW() ELSE map_updated_at END
+                WHERE id=$1 RETURNING ${OPERATOR_REPORT_FIELDS}`, [id, check.team, check.note, check.dismiss, assign, Boolean(shadeReview)])
             : await client.query<MaintenanceDefect>(`UPDATE defect_reports SET status='fixed', fixed_at=NOW()
                 WHERE id=$1 RETURNING ${OPERATOR_REPORT_FIELDS}`, [id]);
         if (assign) await recordAssignment(client, rows[0], 'review');

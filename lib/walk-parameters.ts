@@ -21,3 +21,9 @@ export function readWalkParameters(
         fromLink: hasOrigin || hasDestination,
     };
 }
+
+export function readSharedDeparture(value: string | null): string | null {
+    if (!value || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return null;
+    const instant = Date.parse(value);
+    return Number.isFinite(instant) ? new Date(instant).toISOString() : null;
+}

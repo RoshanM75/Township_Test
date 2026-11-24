@@ -1,5 +1,8 @@
 'use client';
 
+import { shadeChangeLabel, type ShadeResult } from '@/lib/shade-corrections';
+import { malaysiaTimeLabel } from '@/lib/resident-language';
+
 import { useEffect, useMemo, useState, Suspense } from 'react';
 import { useRouter,useSearchParams } from 'next/navigation';
 import type { MouseEvent } from 'react';
@@ -290,19 +293,21 @@ function DashboardWorkspace({area}:{area:PilotId}) {
         }
     }
 
-    async function confirmReport(event: FormEvent, id: string) {
+    async function confirmReport(event: FormEvent<HTMLFormElement>, id: string) {
         event.preventDefault();
         if (!reviewerKey || fixingId) return;
         setFixingId(id);
         const dismiss = ((event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null)?.value === 'dismiss';
+        const shadeResult = new FormData(event.currentTarget).get('shade_result') as ShadeResult | null;
         try {
             const { report } = await checkReport(id, area, reviewerKey,
-                { team: defectById.get(id)?.responsible_team || reviewTeam, note: reviewNote, dismiss });
+                { team: defectById.get(id)?.responsible_team || reviewTeam, note: reviewNote, dismiss,
+                    ...(!dismiss && shadeResult ? { shade_result: shadeResult } : {}) });
             setDefects(previous => dismiss ? previous.filter(item => String(item.id) !== id)
                 : previous.map(item => String(item.id) === id ? report : item));
             setReviewNote('');
             setRefreshVersion(value => value + 1);
-            setNotice({ tone: 'ok', text: dismiss ? 'Report reviewed and dismissed.' : 'Report checked and assigned.' });
+            setNotice({ tone: 'ok', text: dismiss ? 'Report reviewed and dismissed.' : report.map_updated_at ? 'Report checked and map updated.' : 'Report checked and assigned.' });
         } catch (error) { setNotice({ tone: 'error', text: error instanceof Error ? error.message : 'Could not check the report.' }); }
         finally { setFixingId(null); }
     }
@@ -452,6 +457,9 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                                     </dl>
                                     <p className="text-sm font-bold">{reportStatus(selectedDefect)}
                                         {selectedDefect.responsible_team && ` · ${selectedDefect.responsible_team}`}</p>
+                                    {selectedDefect.shade_change && <p className="text-sm">{shadeChangeLabel[selectedDefect.shade_change]}
+                                        {selectedDefect.observed_at && ` · Observed ${malaysiaTimeLabel(selectedDefect.observed_at, 'en', true)} MYT`}</p>}
+                                    {selectedDefect.map_updated_at && <p className="text-sm">Map updated {malaysiaTimeLabel(selectedDefect.map_updated_at, 'en', true)} MYT</p>}
                                     {selectedDefect.review_note && <p className="text-sm">{selectedDefect.review_note}</p>}
                                     {operatorKey && <AssignmentEditor key={selectedDefect.id} area={area} reviewerKey={operatorKey} report={selectedDefect} onSaved={report => {
                                         setDefects(previous => previous.map(row => String(row.id) === String(report.id) ? report : row));
@@ -469,7 +477,15 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                                         </li>)}</ul>
                                     </details>}
                                     {selectedDefect.checked_at ? renderFixButton(String(selectedDefect.id), 'md') : !IS_PAGES_PREVIEW &&
-                                        <form className="space-y-2" onSubmit={event => void confirmReport(event, String(selectedDefect.id))}>
+                                        <form key={selectedDefect.id} className="space-y-2" onSubmit={event => void confirmReport(event, String(selectedDefect.id))}>
+                                            {selectedDefect.kind === 'shade_correction' && <label className="block text-sm font-bold">Condition checked for this segment
+                                                <select name="shade_result" defaultValue="" className="mt-1 block min-h-11 w-full rounded-md border border-slate-300 bg-white px-2" required>
+                                                    <option value="" disabled>Choose the confirmed condition</option>
+                                                    <option value="sun">Direct sun around the observed time</option>
+                                                    <option value="shade">Shade around the observed time</option>
+                                                    <option value="roof_removed">Roof cover removed or absent</option>
+                                                </select>
+                                            </label>}
                                             {!selectedDefect.responsible_team && <label className="block text-sm font-bold">Responsible team
                                                 <input required maxLength={120} className="mt-1 min-h-11 w-full rounded border border-slate-400 px-2"
                                                     value={reviewTeam} onChange={event => setReviewTeam(event.target.value)} />
@@ -479,8 +495,8 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                                                     value={reviewNote} onChange={event => setReviewNote(event.target.value)} />
                                             </label>
                                             <button type="submit" className="min-h-11 rounded-lg bg-slate-800 px-3 font-bold text-white disabled:opacity-50"
-                                                disabled={!reviewerKey || !!fixingId}>Mark checked</button>
-                                            <button type="submit" value="dismiss" className="ml-2 min-h-11 font-bold underline disabled:opacity-50"
+                                                disabled={!reviewerKey || !!fixingId}>{selectedDefect.kind === 'shade_correction' ? 'Check and update map' : 'Mark checked'}</button>
+                                            <button type="submit" value="dismiss" formNoValidate className="ml-2 min-h-11 font-bold underline disabled:opacity-50"
                                                 disabled={!reviewerKey || !!fixingId}>Dismiss report</button>
                                         </form>}
                                 </div>

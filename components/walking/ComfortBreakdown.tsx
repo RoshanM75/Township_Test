@@ -6,8 +6,10 @@ import { environmentSegments, environmentCoverage } from '@/lib/environment';
 export default function ComfortBreakdown({ route, edges, records, night }: { route: JourneyRoute; edges: PathEdge[]; records: VerificationRecord[]; night: boolean }) {
     const ids = new Set(route.edge_ids);
     const roof = environmentCoverage(environmentSegments(edges.filter(e => ids.has(e.id)), records, route.arrival_at, 'cover'));
+    const sun = route.sun_exposure;
     const cards = [
-        { Icon: night ? Moon : Sun, label: night ? 'Poorly lit distance' : 'Sun-exposed distance', value: `${Math.round(night ? route.dark_m : route.uncovered_m)} m`, note: 'Estimate for this departure' },
+        { Icon: night ? Moon : Sun, label: night ? 'Poorly lit distance' : 'Sun-exposed distance', value: `${Math.round(night ? route.dark_m : sun?.sun_m ?? route.uncovered_m)} m`,
+            note: !night && sun ? `${Math.round(sun.unknown_m)} m with unknown shade` : 'Estimate for this departure' },
         { Icon: Umbrella, label: 'Cover information', value: roof.known ? `${roof.known} of ${roof.total}` : 'Not mapped', note: roof.known ? `Segments with information · ${roof.checked} currently checked` : 'Unknown cover is treated conservatively' },
         { Icon: Armchair, label: 'Planned rest', value: `${route.rest_min} min`, note: `${route.verified_rest_stops} currently checked ${route.verified_rest_stops === 1 ? 'facility' : 'facilities'}` },
         { Icon: ClipboardCheck, label: 'Critical path checks', value: `${Math.round(route.evidence_coverage * 100)}%`, note: 'Share of distinct path segments with all critical checks' },
