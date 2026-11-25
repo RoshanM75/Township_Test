@@ -5,13 +5,15 @@ import { Clock } from 'lucide-react';
 import { malaysiaInput, fromMalaysiaInput, type WeatherHour } from '@/lib/comfort';
 import { malaysiaTimeLabel, residentText, type ResidentLanguage } from '@/lib/resident-language';
 
-export default function DepartureControl({ departure, now, onChange, onNow, forecast, language = 'en' }: {
+export default function DepartureControl({ departure, now, onChange, onNow, forecast, revealTime = false, language = 'en' }: {
     departure: string; now: boolean; onChange: (iso: string) => void; onNow: () => void;
-    forecast: WeatherHour | null; language?: ResidentLanguage;
+    forecast: WeatherHour | null; revealTime?: boolean; language?: ResidentLanguage;
 }) {
     const t = (label: Parameters<typeof residentText>[1]) => residentText(language, label);
     const [draft, setDraft] = useState<string | null>(null);
     const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const timePanel = useRef<HTMLDetailsElement>(null);
+    useEffect(() => { if (revealTime && timePanel.current) timePanel.current.open = true; }, [revealTime]);
     useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
     const time = draft ?? departure;
     const local = malaysiaInput(time);
@@ -38,7 +40,7 @@ export default function DepartureControl({ departure, now, onChange, onNow, fore
             <span><strong>{now && !draft ? t('Leaving now') : malaysiaTimeLabel(time, language, true)}</strong><small>{t('Malaysia time')}</small></span>
             <button type="button" className="tg-text-action" aria-pressed={now} onClick={() => { cancelDraft(); onNow(); }}>{t('Now')}</button>
         </div>
-        <details className="tg-details">
+        <details className="tg-details" ref={timePanel}>
             <summary>{t('Leave at…')}</summary>
             <div className="tg-stack mt-2">
                 <label className="tg-label">{t('Departure time (Malaysia)')}

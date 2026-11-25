@@ -1,7 +1,7 @@
 'use client';
 import { useId } from 'react';
 import type { Profile } from '@/lib/routing';
-import type { WalkingNeeds } from '@/lib/walking';
+import { WALK_BUDGETS, type WalkingNeeds } from '@/lib/walking';
 import { residentText, type ResidentLabel, type ResidentLanguage } from '@/lib/resident-language';
 
 export default function WalkingRequirements({ needs, profile, onChange, language = 'en' }: { needs: WalkingNeeds; profile: Profile; onChange: (value: WalkingNeeds) => void; language?: ResidentLanguage }) {
@@ -33,7 +33,7 @@ export default function WalkingRequirements({ needs, profile, onChange, language
                 <div className="grid grid-cols-2 gap-3">
                     <label htmlFor={`${id}-budget`}>{t('Total trip budget')}
                         <select id={`${id}-budget`} className="mt-1 min-h-11 w-full rounded border border-slate-400 bg-white px-2" value={needs.budget_min} onChange={e => set('budget_min', Number(e.target.value))}>
-                            {[5,10,15,20,30,45,60,90,120].map(n => <option key={n} value={n}>{n} minutes</option>)}
+                            {WALK_BUDGETS.map(n => <option key={n} value={n}>{n} minutes</option>)}
                         </select>
                     </label>
                     <label htmlFor={`${id}-slope`}>{t('Maximum slope (%)')}

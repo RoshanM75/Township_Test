@@ -1,6 +1,6 @@
 import { DESTINATIONS } from './precinct.ts';
 import { pointInPilot, type PilotContext } from './pilots.ts';
-import { nearestEdge, type Graph } from './routing.ts';
+import { nearestEdge, reachableNodes, type Graph } from './routing.ts';
 import { pointAt } from './walking-geometry.ts';
 import type { WalkingAsset } from './walking.ts';
 
@@ -21,15 +21,7 @@ export function presetStartPoints(context: PilotContext, assets: WalkingAsset[],
     if (!originEdge) return [start];
 
     // Keep presets on a pedestrian network connected to the area's start.
-    const visited = new Set([originEdge.from_node, originEdge.to_node]);
-    const queue = [...visited];
-    for (let i = 0; i < queue.length; i++) {
-        for (const { to } of graph.adj.get(queue[i]) ?? []) {
-            if (visited.has(to)) continue;
-            visited.add(to);
-            queue.push(to);
-        }
-    }
+    const visited = reachableNodes(graph, [originEdge.from_node, originEdge.to_node]);
 
     const places = context.area_id === 'elmina'
         ? DESTINATIONS.map(bridge => assets.find(asset => asset.external_id === bridge.id))
