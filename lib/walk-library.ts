@@ -14,9 +14,12 @@ export type PackCheck = Pick<VerificationRecord, 'id' | 'created_at' | 'target_t
 export interface WalkPack { version: 1; id: string; saved_at: string; data_at: string; title: string; route: JourneyRoute; profile: Profile;
     area_id?:PilotId;dataset_id?:string;
     needs: WalkingNeeds; origin: [number, number]; network_snapshot_at?: string | null; facilities: WalkingAsset[]; edges: PathEdge[]; checks: PackCheck[] }
+// The walker may explicitly confirm that they reached the selected place.
+// No arrival is inferred from a planned route or from finishing its timer.
+export interface ConfirmedVisit { place_id: string; name: string }
 export interface CompletedWalk { id: string; title: string; started_at: string; finished_at: string; profile: Profile; active_ms: number; track: TrackState;
     area_id?:PilotId;
-    planned_m: number; planned_min: number; feedback: WalkFeedback | null }
+    planned_m: number; planned_min: number; feedback: WalkFeedback | null; confirmed_visit?: ConfirmedVisit }
 export interface WalkLibrary { version: 1; packs: WalkPack[]; history: CompletedWalk[]; updates: ConditionUpdate[] }
 export interface WalkSession { id: string; pack: WalkPack; started_at: string; elapsed_ms: number; track: TrackState; restored?: boolean }
 export const DRAFT_KEY = 'townshipgo:active-walk:v1';
