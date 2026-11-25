@@ -8,10 +8,10 @@ import { residentText, type ResidentLanguage, type ResidentLabel } from '@/lib/r
 import { residentPlaceName, routeStepAt } from '@/lib/resident-walking';
 import WalkFeedback from './WalkFeedback';
 
-export default function WalkRecorder({ session, onComplete, onFeedback, onPosition, onNewWalk, onShareShortcut, language, panelControl, children }: { session: WalkSession;
+export default function WalkRecorder({ session, onComplete, onFeedback, onPosition, onNewWalk, onShareShortcut, language, voiceEnabled = false, panelControl, children }: { session: WalkSession;
     onComplete: (walk: CompletedWalk) => boolean; onFeedback: (id: string, feedback: Feedback) => boolean;
     onPosition: (point: [number, number]) => void; onNewWalk: () => void;
-    onShareShortcut?: (walk: CompletedWalk) => void; language: ResidentLanguage; panelControl: ReactNode; children?: ReactNode }) {
+    onShareShortcut?: (walk: CompletedWalk) => void; language: ResidentLanguage; voiceEnabled?: boolean; panelControl: ReactNode; children?: ReactNode }) {
     const t = (label: ResidentLabel) => residentText(language, label);
     const [paused, setPaused] = useState(!!session.restored), [gps, setGps] = useState(false);
     const [base, setBase] = useState(session.elapsed_ms), [started, setStarted] = useState(Date.now), [clock, setClock] = useState(Date.now);
@@ -65,6 +65,27 @@ export default function WalkRecorder({ session, onComplete, onFeedback, onPositi
         }, () => { setGps(false); setMessage('Location recording is unavailable or permission was declined. Your timer still works.'); }, { enableHighAccuracy: true, maximumAge: 0, timeout: 12000 });
         return () => navigator.geolocation.clearWatch(watcher);
     }, [gps, paused, completed, onPosition, session.pack.route]);
+    const lastSpoken = useRef<string | null>(null);
+    useEffect(() => {
+        if (!voiceEnabled || !gps || paused || completed || !guidance || !('speechSynthesis' in window)) {
+            lastSpoken.current = null;
+            return;
+        }
+        const key = guidance.onRoute ? `step:${guidance.index}` : 'off-route';
+        if (lastSpoken.current === key) return;
+        lastSpoken.current = key;
+        const step = session.pack.route.steps?.[guidance.index];
+        const crossing = session.pack.edges.some(edge => edge.id === step?.edge_id && edge.is_crossing);
+        const named = step && !/^Footpath \d+$/i.test(step.name) ? step.name : null;
+        const message = !guidance.onRoute ? residentText(language, 'Check your position on the map')
+            : crossing ? [residentText(language, 'Crossings'), named].filter(Boolean).join('. ')
+            : named ?? residentText(language, 'Follow the mapped route');
+        const utterance = new SpeechSynthesisUtterance(message);
+        utterance.lang = language === 'ms' ? 'ms-MY' : 'en-MY';
+        utterance.rate = .9;
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(utterance);
+    }, [voiceEnabled, gps, paused, completed, guidance, language, session.pack]);
     function finish() {
         const active = base + (paused ? 0 : Math.max(0, Date.now() - started));
         const result: CompletedWalk = { id: session.id, title: session.pack.title, started_at: session.started_at, finished_at: new Date().toISOString(),

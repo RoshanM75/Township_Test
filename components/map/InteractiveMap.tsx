@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { ReportMarker } from '@/lib/types';
 import type { WalkingAsset, VerificationRecord } from '@/lib/walking';
@@ -85,7 +85,28 @@ function LocationPicker({ onSelect }: { onSelect?: (lat: number, lng: number) =>
     return null;
 }
 
+// Leaflet 1.9 can leave a queued canvas redraw after a synchronous redraw
+// clears its frame handle. On fast pilot/mode switches that callback can run
+// after the canvas context is destroyed. Guard only the resident renderer
+// instances, retaining canvas performance for the detailed local basemap.
+const leafletCanvasRedraw = (L.Canvas.prototype as unknown as { _redraw: (this: L.Canvas) => void })._redraw;
+class ResidentCanvas extends L.Canvas {
+    private attached = false;
+    onAdd(map: L.Map): this {
+        this.attached = true;
+        return super.onAdd(map);
+    }
+    onRemove(map: L.Map): this {
+        this.attached = false;
+        return super.onRemove(map);
+    }
+    _redraw() {
+        if (this.attached) leafletCanvasRedraw.call(this);
+    }
+}
+
 function LocalBasemap({ url }: { url: string }) {
+    const renderer = useMemo(() => new ResidentCanvas({ pane: 'pilot-basemap' }), []);
     const [data, setData] = useState<FeatureCollection | null>(null);
     useEffect(() => {
         const controller = new AbortController();
@@ -99,13 +120,13 @@ function LocalBasemap({ url }: { url: string }) {
     return data && <GeoJSON data={data} interactive={false} filter={feature => feature.geometry.type !== 'Point'}
         style={feature => {
             const kind = feature?.properties.kind;
-            if (kind === 'building') return { color: '#a9acb4', fillColor: '#c2c4ca', fillOpacity: 0.85, weight: 1 };
-            if (kind === 'green' || kind === 'water') return { stroke: false, fillColor: kind === 'water' ? '#b6dbe0' : '#cfdcc6', fillOpacity: 1 };
+            if (kind === 'building') return { renderer, color: '#a9acb4', fillColor: '#c2c4ca', fillOpacity: 0.85, weight: 1 };
+            if (kind === 'green' || kind === 'water') return { renderer, stroke: false, fillColor: kind === 'water' ? '#b6dbe0' : '#cfdcc6', fillOpacity: 1 };
             if (kind === 'street') return feature?.properties.road === 'major'
-                ? { color: '#e3c498', weight: 6 } : { color: '#fffefa', weight: 4 };
-            if (kind === 'watercourse') return { color: '#91b9ce', weight: 3 };
-            if (kind === 'rail') return { color: '#86909a', weight: 1.5, dashArray: '4 3' };
-            return { color: '#a8a392', opacity: 0.65, weight: 1, dashArray: '3 3' };
+                ? { renderer, color: '#e3c498', weight: 6 } : { renderer, color: '#fffefa', weight: 4 };
+            if (kind === 'watercourse') return { renderer, color: '#91b9ce', weight: 3 };
+            if (kind === 'rail') return { renderer, color: '#86909a', weight: 1.5, dashArray: '4 3' };
+            return { renderer, color: '#a8a392', opacity: 0.65, weight: 1, dashArray: '3 3' };
         }} />;
 }
 
@@ -201,10 +222,12 @@ function MapBehavior({
     language: ResidentLanguage;
 }) {
     const map = useMap();
+    const deferredCamera = useRef<(() => void) | null>(null);
 
     const fit = useCallback(
         (animate: boolean) => {
-            if (points.length === 0) return;
+            const el = map.getContainer();
+            if (points.length === 0 || !el.isConnected || !el.clientWidth || !el.clientHeight) return;
             map.fitBounds(L.latLngBounds(points), {
                 paddingTopLeft: [40, 40],
                 paddingBottomRight: [76, 76],
@@ -219,22 +242,41 @@ function MapBehavior({
     // Fly to the focused point if there is one, otherwise show everything
     const focusKey = focus ? `${focus[0]},${focus[1]}` : '';
     useEffect(() => {
-        if (focus) {
-            const zoom = Math.max(map.getZoom(), 17);
-            if (reduceMotion) map.setView(focus, zoom, { animate: false });
-            else map.flyTo(focus, zoom, { duration: 0.8 });
-        } else {
-            fit(true);
-        }
+        const applyCamera = () => {
+            const el = map.getContainer();
+            if (!el.isConnected || !el.clientWidth || !el.clientHeight) {
+                deferredCamera.current = applyCamera;
+                return;
+            }
+            deferredCamera.current = null;
+            if (focus) {
+                const zoom = Math.max(map.getZoom(), 17);
+                if (reduceMotion) map.setView(focus, zoom, { animate: false });
+                else map.flyTo(focus, zoom, { duration: 0.8 });
+            } else {
+                fit(true);
+            }
+        };
+        applyCamera();
+        return () => { if (deferredCamera.current === applyCamera) deferredCamera.current = null; };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [fit, focusKey]);
 
     // The panels around the map can change size, so keep Leaflet in sync
     useEffect(() => {
         const el = map.getContainer();
-        const ro = new ResizeObserver(() => map.invalidateSize());
+        let active = true;
+        // Saved/Profile hide the map. Updating Leaflet at zero size can move
+        // its camera off the displayed area, and queued observers must not
+        // touch a removed map when a pilot tab is replaced.
+        const ro = new ResizeObserver(() => {
+            if (active && el.isConnected && el.clientWidth && el.clientHeight) {
+                map.invalidateSize({ animate: false });
+                deferredCamera.current?.();
+            }
+        });
         ro.observe(el);
-        return () => ro.disconnect();
+        return () => { active = false; ro.disconnect(); };
     }, [map]);
 
     // Taps on our buttons must not reach the map
@@ -334,6 +376,11 @@ export default function InteractiveMap({
     const brand = highContrast ? WALK_ROUTE_HC : WALK_ROUTE;
     const overview = pins !== undefined;
     const largeTiles = labelScale > 1;
+    // Resident maps resize or unmount during tab/pilot switches. Leaflet 1.9's
+    // CSS zoom completion timeout can outlive its map pane; use synchronous
+    // zoom for these maps. Pan/fly-to motion and map styling are unchanged.
+    const zoomAnimation = !localBasemap && !reduceMotion;
+    const renderer = useMemo(() => localBasemap ? new ResidentCanvas() : undefined, [localBasemap]);
     const [localLayer, setLocalLayer] = useState<EnvironmentLayer | 'routes'>('routes');
     const layer = informationLayer ?? localLayer;
     const layerEdges = environment?.edges, layerRecords = environment?.records, layerTime = environment?.at;
@@ -426,8 +473,9 @@ export default function InteractiveMap({
                 scrollWheelZoom
                 className="w-full h-full"
                 zoomControl={false}
-                zoomAnimation={!reduceMotion}
+                zoomAnimation={zoomAnimation}
                 fadeAnimation={!reduceMotion}
+                renderer={renderer}
                 preferCanvas={Boolean(localBasemap)}
             >
                 {localBasemap && <Pane name="pilot-basemap" style={{ zIndex: 190 }}><LocalBasemap url={localBasemap} /></Pane>}

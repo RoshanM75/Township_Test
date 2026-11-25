@@ -1,4 +1,4 @@
-import type { Mode, Profile } from './routing';
+import { isWalkingProfile, type Mode } from './routing.ts';
 
 export function readWalkParameters(
     params: Pick<URLSearchParams, 'get'>,
@@ -16,7 +16,7 @@ export function readWalkParameters(
     return {
         origin: hasOrigin ? [lat, lng] as [number, number] : defaultOrigin,
         destination: hasDestination ? destination : destinationIds[0],
-        profile: (['senior', 'cane_walker', 'wheelchair'].includes(profile ?? '') ? profile : 'senior') as Profile,
+        profile: isWalkingProfile(profile) ? profile : 'senior',
         mode: (['direct', 'coolest', 'sheltered', 'safest'].includes(mode ?? '') ? mode : null) as Mode | null,
         fromLink: hasOrigin || hasDestination,
     };

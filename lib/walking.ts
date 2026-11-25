@@ -64,7 +64,12 @@ export function placeSearchText(asset:WalkingAsset){
     return [asset.name,asset.category,...['osm_name','name_ms','name_en','station_ref','official_name','official_address'].map(key=>asset.properties[key])].filter(value=>typeof value==='string').join(' ').toLowerCase();
 }
 
+export const COMFORT_PREFERENCES = ['shade', 'shelter', 'lighting', 'controlled_crossings', 'seating'] as const;
+export type ComfortPreference = typeof COMFORT_PREFERENCES[number];
+
 export interface WalkingNeeds {
+    // Optional preferences rank eligible routes; they never waive or introduce access requirements.
+    comfort?: ComfortPreference[];
     step_free: boolean;
     max_slope_pct: number;
     avoid_uncontrolled_crossings: boolean;
@@ -120,6 +125,8 @@ export interface JourneyRoute extends RouteResult {
     unsheltered_m: number;
     sun_exposure?: RouteShade;
     unverified_crossings: number;
+    uncontrolled_crossings?: number;
+    mapped_rest_stops?: number;
     unchecked_segments: number;
     evidence_coverage: number;
     suitability: 'red' | 'yellow' | 'green';
