@@ -58,7 +58,7 @@ test('the public snapshot plans actual Elmina walks without inventing field chec
     assert.deepEqual(snapshot.reports.reports, []);
     assert.equal(snapshot.walking.assets.length, 4);
     for (const destination of snapshot.walking.assets.filter(a => a.kind === 'destination')) {
-        for (const profile of ['senior', 'cane_walker', 'wheelchair']) {
+        for (const profile of ['everyday', 'senior', 'cane_walker', 'wheelchair', 'stroller']) {
             const plan = planJourney(snapshot.graph.nodes, snapshot.graph.edges, snapshot.walking, { origin: DEFAULT_ORIGIN,
                 destination, profile, needs: DEFAULT_NEEDS, departure_at: snapshot.walking.as_of });
             assert.ok(plan.routes.direct, `${profile}: ${destination.name}`);

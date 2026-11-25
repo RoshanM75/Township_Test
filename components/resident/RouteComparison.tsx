@@ -38,9 +38,9 @@ export function RouteChecks({ route, language }: { route: JourneyRoute; language
     </p>;
 }
 
-export default function RouteComparison({ routes, modes, chosen, fastest, night, language, onChoose }: {
+export default function RouteComparison({ routes, modes, chosen, fastest, night, language, recommended, onChoose }: {
     routes: Partial<Record<Mode, JourneyRoute>>; modes: Mode[]; chosen: Mode; fastest: Mode; night: boolean;
-    language: ResidentLanguage; onChoose: (mode: Mode) => void;
+    language: ResidentLanguage; recommended?: Mode | null; onChoose: (mode: Mode) => void;
 }) {
     const t = (label: ResidentLabel) => residentText(language, label);
     const base = routes[fastest]?.total_min ?? 0;
@@ -58,9 +58,11 @@ export default function RouteComparison({ routes, modes, chosen, fastest, night,
             return <button type="button" key={mode} className="tg-route-card" aria-pressed={chosen === mode} onClick={() => onChoose(mode)}>
                 <Icon size={20} aria-hidden />
                 <span className="tg-route-card-label"><strong>{t(routeLabel(mode, night, fastest))}</strong>
+                    {recommended === mode && <small className="tg-route-profile-match">{t('Suggested for your profile')}</small>}
                     <RouteSun route={route} language={language} />
                     {savings > 0 && <small>{savings} min {t('less in direct sun')}</small>}
                     <RouteCoverage route={route} language={language} />
+                    {route.mapped_rest_stops !== undefined && route.mapped_rest_stops > 0 && <small>{route.mapped_rest_stops} {t('mapped rest locations on route')}</small>}
                 </span>
                 <span className="tg-route-card-time"><strong>{walkMinutes(route)} min</strong>
                     {seconds ? <small>{extra} {t('longer')}</small> : <small>{Math.round(route.length_m)} m</small>}
@@ -69,7 +71,7 @@ export default function RouteComparison({ routes, modes, chosen, fastest, night,
         });
     }
 
-    const lead = [...new Set([fastest, ...(!night ? ['coolest' as Mode] : []), 'sheltered' as Mode, chosen])].filter(mode => modes.includes(mode));
+    const lead = [...new Set([fastest, ...(!night ? ['coolest' as Mode] : []), 'sheltered' as Mode, chosen, ...(recommended ? [recommended] : [])])].filter(mode => modes.includes(mode));
     const more = modes.filter(mode => !lead.includes(mode));
     return <div className="tg-stack" role="group" aria-label={t('Route choices')}>
         <div className="tg-route-grid">{choices(lead)}</div>

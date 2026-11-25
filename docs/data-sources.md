@@ -40,7 +40,7 @@ The router also rejects `street` edges and edges explicitly marked as inaccessib
 
 ## Coverage and confidence
 
-`lib/precinct.ts` uses Elmina OSM path node 8447864418 between two bridge destinations named in OSM, on the same walking component. Tests verify both sample walks fit the default 30-minute budget for all three mobility profiles. The earlier sample node required a long mapped detour and exceeded that budget. Routes cannot be inferred across a missing pedestrian link, and coverage outside this snapshot requires additional mapping.
+`lib/precinct.ts` uses Elmina OSM path node 8447864418 between two bridge destinations named in OSM, on the same walking component. Tests verify both sample walks fit the default 30-minute budget for all five mobility profiles. The earlier sample node required a long mapped detour and exceeded that budget. Routes cannot be inferred across a missing pedestrian link, and coverage outside this snapshot requires additional mapping.
 
 Covered and lighting tags are weak hints marked `modelled`; unspecified shade, lighting, slope and surface attributes are not silently converted into audited observations. Routing fallback assumptions help compare walks but do not verify on-the-ground conditions. Resident reports are stored separately and affect subsequent route planning.
 

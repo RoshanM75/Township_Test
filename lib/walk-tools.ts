@@ -1,7 +1,7 @@
 import { planJourney } from './journeys.ts';
 import { evidenceFor, openingAt } from './verification.ts';
 import type { PlanningInput, WalkingData, WalkingAsset } from './walking.ts';
-import type { HazardReport, PathEdge, PathNode } from './routing.ts';
+import { requiresStepFreeProfile, type HazardReport, type PathEdge, type PathNode } from './routing.ts';
 
 export const FACILITY_LABELS = { rest: 'Seats', toilet: 'Toilets', water: 'Drinking water', shelter: 'Shelters' } as const;
 export type FacilityKind = keyof typeof FACILITY_LABELS;
@@ -38,10 +38,10 @@ export function findFacilities(nodes: PathNode[], edges: PathEdge[], data: Walki
         const at = route?.arrival_at ?? request.departure_at;
         const checks = evidenceFor(data.verifications, 'facility', asset.id, at);
         const facts = { ...asset.properties, ...Object.fromEntries(Object.entries(checks).map(([k, v]) => [k, v.value])) };
-        const required = ['available', 'path_connection', 'opening_hours', ...(request.needs.step_free || request.profile === 'wheelchair' ? ['step_free'] : []),
+        const required = ['available', 'path_connection', 'opening_hours', ...(request.needs.step_free || requiresStepFreeProfile(request.profile) ? ['step_free'] : []),
             ...(kind === 'rest' ? [request.profile === 'wheelchair' ? 'wheelchair_space' : 'has_seat'] : []),
             ...(kind === 'water' ? ['water_available'] : []), ...(kind === 'shelter' ? ['sheltered'] : []),
-            ...(kind === 'toilet' && (request.needs.step_free || request.profile === 'wheelchair') ? ['accessible_toilet'] : [])];
+            ...(kind === 'toilet' && (request.needs.step_free || requiresStepFreeProfile(request.profile)) ? ['accessible_toilet'] : [])];
         const missing = required.filter(f => checks[f]?.status !== 'verified');
         const unavailable = required.some(field => field !== 'opening_hours' && facts[field] === false) || openingAt(facts.opening_hours, at) === false;
         if (unavailable || (request.needs.verified_only && missing.length)) route = null;

@@ -2,14 +2,14 @@
  * AksesMy routing engine.
  *
  * Replaces hand-drawn route_segments with real shortest-path search over a pedestrian graph.
- * One engine with route-specific weights, four user profiles.
+ * One engine with route-specific weights, user-specific walking profiles.
  */
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 export type DataSource = 'audited' | 'reported' | 'modelled' | 'assumed';
-export type Profile = 'senior' | 'cane_walker' | 'wheelchair';
+export type Profile = 'everyday' | 'senior' | 'cane_walker' | 'wheelchair' | 'stroller';
 export type TimeSlot = 'morning' | 'midday' | 'afternoon' | 'night';
 export type Mode = 'direct' | 'coolest' | 'sheltered' | 'safest';
 export type HazardKind = 'blocked' | 'no_ramp' | 'light_out' | 'no_shade' | 'broken_surface' | 'lift_out' | 'details_outdated' | 'shade_correction';
@@ -85,10 +85,20 @@ export interface ProfileConfig {
 }
 
 export const PROFILES: Record<Profile, ProfileConfig> = {
+    everyday: { label: 'Independent walking', speed_mps: 1.1, step_penalty_s: 20, hard_steps: false, hard_slope: false, hard_rough: false, needs_kerb_ramp: false },
+    stroller: { label: 'With a stroller', speed_mps: 1, step_penalty_s: 0, hard_steps: true, hard_slope: false, hard_rough: false, needs_kerb_ramp: true },
     senior: { label: 'Senior', speed_mps: 0.8, step_penalty_s: 90, hard_steps: false, hard_slope: false, hard_rough: false, needs_kerb_ramp: false },
     cane_walker: { label: 'Cane / walker', speed_mps: 0.6, step_penalty_s: 150, hard_steps: false, hard_slope: false, hard_rough: false, needs_kerb_ramp: false },
     wheelchair: { label: 'Wheelchair', speed_mps: 0.7, step_penalty_s: 0, hard_steps: true, hard_slope: true, hard_rough: true, needs_kerb_ramp: true },
 };
+
+export function isWalkingProfile(value: unknown): value is Profile {
+    return typeof value === 'string' && Object.hasOwn(PROFILES, value);
+}
+
+export function requiresStepFreeProfile(profile: Profile) {
+    return PROFILES[profile].hard_steps;
+}
 
 export const ASSUMPTIONS = {
     max_ramp_slope_pct: 8.33,
@@ -303,6 +313,7 @@ export interface CostContext {
     strictUnknown?: boolean;
     speedMps?: number;
     heatMultiplier?: number;
+    preferControlledCrossings?: boolean;
 }
 
 export interface EdgeEval {
@@ -408,6 +419,7 @@ export function evaluateEdge(e: PathEdge, ctx: CostContext): EdgeEval {
                 notes.push('Wide crossing without a signal');
             }
         }
+        if (ctx.preferControlledCrossings && e.crossing_type !== 'signalised' && e.crossing_type !== 'zebra') penalty += 120;
         if (has_kerb_ramp === false) {
             if (p.needs_kerb_ramp) hard.push('No kerb ramp');
             else penalty += 30;

@@ -1,4 +1,4 @@
-import type { Profile, PathEdge } from './routing.ts';
+import { isWalkingProfile, type Profile, type PathEdge } from './routing.ts';
 import type { JourneyRoute, WalkingNeeds, WalkingData, VerificationRecord, WalkingAsset } from './walking.ts';
 import type { TrackState } from './walk-tracking.ts';
 import { projectPoint } from './walking-geometry.ts';
@@ -34,7 +34,7 @@ const instant = (value: unknown) => typeof value === 'string' && Number.isFinite
 const trackValid = (track: TrackState) => track && Array.isArray(track.fixes) && ['distance_m','pace_distance_m','moving_s','rejected'].every(k => Number.isFinite(track[k as keyof TrackState]) && Number(track[k as keyof TrackState]) >= 0);
 function packValid(p: WalkPack) {
     return p && p.version === 1 && (p.area_id===undefined||isPilot(p.area_id)) && typeof p.id === 'string' && typeof p.title === 'string' && coordinate(p.origin)
-        && ['senior','cane_walker','wheelchair'].includes(p.profile) && instant(p.saved_at) && instant(p.data_at) && p.needs && p.route
+        && isWalkingProfile(p.profile) && instant(p.saved_at) && instant(p.data_at) && p.needs && p.route
         && Array.isArray(p.route.coordinates) && p.route.coordinates.length >= 2 && p.route.coordinates.every(coordinate)
         && ['length_m','total_min','rest_min'].every(k => Number.isFinite(p.route[k as keyof JourneyRoute]))
         && p.route.entrance && typeof p.route.entrance.name === 'string' && p.route.destination && typeof p.route.destination.name === 'string'

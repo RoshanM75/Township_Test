@@ -7,7 +7,7 @@ import { useSearchParams,useRouter } from 'next/navigation';
 import {
     MapPin, Navigation, LocateFixed, Search, CloudRain, Sun, X, Send, Share2, Check, ChevronDown, CircleDot,
     Footprints, Lightbulb, Ban, Accessibility,
-    AlertTriangle, Phone, MessageCircle, Copy, Volume2, Compass, Bookmark, Route as RouteIcon, ClipboardList, Armchair,
+    AlertTriangle, Phone, MessageCircle, Copy, Volume2, Compass, Bookmark, Route as RouteIcon, ClipboardList, UserRound, SlidersHorizontal, LockKeyhole,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { loadGraph as fetchGraph, loadHazards, loadReports, submitReport, loadWalkingData, loadWeather, loadWeatherWarnings, loadPilotContext, loadCommunityRoutes } from '@/lib/api';
@@ -16,12 +16,12 @@ import type { MaintenanceDefect } from '@/lib/types';
 import { useClientReady } from '@/lib/use-client-ready';
 import { readSharedDeparture, readWalkParameters } from '@/lib/walk-parameters';
 import { DESTINATIONS } from '@/lib/precinct';
-import { normaliseNeeds } from '@/lib/journeys';
 import { evidenceFor, malaysiaHour } from '@/lib/verification';
 import { forecastAt, malaysiaInput, fromMalaysiaInput, type WalkingWeather } from '@/lib/comfort';
-import type { WalkingData, WalkingAsset, WalkingNeeds, JourneyPlan } from '@/lib/walking';
+import { WALK_BUDGETS, type WalkingData, type WalkingAsset, type JourneyPlan } from '@/lib/walking';
 import RouteQualityBar from '@/components/walking/RouteQualityBar';
-import WalkingRequirements from '@/components/walking/WalkingRequirements';
+import { WalkingProfilePanel, WalkingProfileSetup, WalkingProfileEditor, compactWalkingSummary } from '@/components/walking/WalkingProfile';
+import { newDeviceWalkingProfile, normaliseWalkingSettings, readDeviceWalkingProfile, writeDeviceWalkingProfile, sharedWalkingSettings, sharedWalkBudget, type WalkingSettings, type DeviceWalkingProfile } from '@/lib/walking-profile';
 import DepartureControl from '@/components/walking/DepartureControl';
 import DepartureOptions from '@/components/walking/DepartureOptions';
 import { solarModel, type ShadeDataset } from '@/lib/solar-shade';
@@ -34,8 +34,8 @@ import WalkingConditions from '@/components/walking/WalkingConditions';
 import ComfortBreakdown from '@/components/walking/ComfortBreakdown';
 import type { EnvironmentLayer } from '@/lib/environment';
 import {
-    buildGraph, nearestEdge, slotForHour, PROFILES,
-    type Profile, type Mode, type TimeSlot, type PathNode, type PathEdge,
+    buildGraph, nearestEdge, slotForHour,
+    type Mode, type TimeSlot, type PathNode, type PathEdge,
     type HazardReport, type HazardKind, type RouteResult,
 } from '@/lib/routing';
 import { createWalkPack, emptyLibrary, readLibrary, writeLibrary, readWalkDraft, withPersonalUpdates,
@@ -46,7 +46,6 @@ import ExploreWalks from '@/components/walking/ExploreWalks';
 import SavedWalks from '@/components/walking/SavedWalks';
 import WalkRecorder from '@/components/walking/WalkRecorder';
 import WalkTimeline from '@/components/walking/WalkTimeline';
-import PaceCalibration from '@/components/walking/PaceCalibration';
 import QuickConditionUpdate from '@/components/walking/QuickConditionUpdate';
 import PilotSelector from '@/components/walking/PilotSelector';
 import PilotSources from '@/components/walking/PilotSources';
@@ -232,10 +231,15 @@ function ResidentPageContent() {
     const [startQuery, setStartQuery] = useState('');
     const [pilotData,setPilotData]=useState<PilotContext|null>(null);
     const [startingWalk,setStartingWalk]=useState(false);
-    const [profile, setProfile] = useState<Profile>(() => {
-        if (searchParams.has('profile')) return initialWalk.profile;
-        try { const saved=localStorage.getItem('townshipgo:selected-profile:v1');return saved && Object.keys(PROFILES).includes(saved) ? saved as Profile : initialWalk.profile; } catch { return initialWalk.profile; }
+    const [deviceProfile, setDeviceProfile] = useState(() => {
+        try { return readDeviceWalkingProfile(localStorage); } catch { return newDeviceWalkingProfile(); }
     });
+    const [tripProfile, setTripProfile] = useState<WalkingSettings | null>(() => {
+        const replan = boot.collection.library.packs.find(pack => pack.id === searchParams.get('replan') && (pack.area_id ?? 'elmina') === area);
+        return replan ? normaliseWalkingSettings(replan.profile, replan.needs) : sharedWalkingSettings(searchParams, deviceProfile.settings);
+    });
+    const activeWalkingSettings = tripProfile ?? deviceProfile.settings;
+    const { profile, needs } = activeWalkingSettings;
 
     const [initialTime] = useState(() => new Date().toISOString());
     const [planningNow,setPlanningNow]=useState(initialTime);
@@ -244,15 +248,6 @@ function ResidentPageContent() {
     const [sourceWalkingData, setWalkingData] = useState<WalkingData | null>(null);
     const [networkSnapshot, setNetworkSnapshot] = useState<string | null>(null);
     const [exactDestination, setExactDestination] = useState<string | null>(searchParams.get('destId')?'Requested place':null);
-    const [needs, setNeeds] = useState(() => {
-        try {
-            const parsed=normaliseNeeds(JSON.parse(searchParams.get('needs') || localStorage.getItem('townshipgo:walking-needs:v1') || '{}'));
-            const previous=localStorage.getItem('townshipgo:selected-profile:v1');
-            return !searchParams.has('needs') && previous && previous !== profile ? { ...parsed, speed_mps: null } : parsed;
-        }
-        catch { return normaliseNeeds({}); }
-    });
-
     const [nodes, setNodes] = useState<PathNode[]>([]);
     const [edges, setEdges] = useState<PathEdge[]>([]);
     const [hazards, setHazards] = useState<HazardReport[]>([]);
@@ -284,9 +279,9 @@ function ResidentPageContent() {
     const [libraryMessage, setLibraryMessage] = useState<string | null>(initialLibrary.warning);
     const [walkSession, setWalkSession] = useState<WalkSession | null>(boot.draft);
     const [sessionFinished, setSessionFinished] = useState(false);
-    const [view, setView] = useState<'plan' | 'walk' | 'saved'>(walkSession && !openingShared ? 'walk' : 'plan');
+    const [view, setView] = useState<'plan' | 'walk' | 'saved' | 'profile'>(walkSession && !openingShared ? 'walk' : 'plan');
     const [returning, setReturning] = useState(searchParams.get('return') === '1');
-    const [budgetOverride, setBudgetOverride] = useState<number | null>(null);
+    const [budgetOverride, setBudgetOverride] = useState<number | null>(() => sharedWalkBudget(searchParams) ?? tripProfile?.needs.budget_min ?? null);
     const [savingPack, setSavingPack] = useState(false);
     const [panelState, setPanelState] = useState<PanelState>('min');
     const panelMinimized = panelState === 'min';
@@ -322,19 +317,46 @@ function ResidentPageContent() {
             if (raw) stored = JSON.parse(raw);
         } catch { /* ignore inaccessible storage */ }
         const systemReduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-        return { ...DEFAULT_PREFS, reduceMotion: systemReduce, ...(stored ?? {}) };
+        return { ...DEFAULT_PREFS,
+            mapMode: stored?.mapMode === '2d' ? '2d' : '3d',
+            scale: stored?.scale === 'large' || stored?.scale === 'xlarge' ? stored.scale : 'normal',
+            highContrast: stored?.highContrast === true,
+            reduceMotion: typeof stored?.reduceMotion === 'boolean' ? stored.reduceMotion : systemReduce,
+            vibrate: stored?.vibrate !== false,
+            speak: stored?.speak === true,
+            language: stored?.language === 'ms' ? 'ms' : 'en',
+        };
     });
     const language = prefs.language === 'ms' ? 'ms' : 'en';
     const t = (label: ResidentLabel) => residentText(language, label);
     const [showSettings, setShowSettings] = useState(false);
+    const [showProfileSetup, setShowProfileSetup] = useState(() => deviceProfile.status === 'new' && !openingShared && !boot.draft);
+    const [profileEditor, setProfileEditor] = useState<'default' | 'trip' | null>(null);
+    const [showProfilePrivacy, setShowProfilePrivacy] = useState(false);
+    const [profileMessage, setProfileMessage] = useState<ResidentLabel | null>(null);
     const [showShare, setShowShare] = useState(false);
-    const [shareUrl, setShareUrl] = useState('');
+    const [shareBaseUrl, setShareBaseUrl] = useState('');
+    const [shareSettings, setShareSettings] = useState<WalkingSettings | null>(null);
+    const [sharePreferences, setSharePreferences] = useState(false);
+    const shareUrl = useMemo(() => {
+        if (!shareBaseUrl || !sharePreferences || !shareSettings) return shareBaseUrl;
+        const link = new URL(shareBaseUrl);
+        link.searchParams.set('profile', shareSettings.profile);
+        link.searchParams.set('needs', JSON.stringify(shareSettings.needs));
+        return link.toString();
+    }, [shareBaseUrl, sharePreferences, shareSettings]);
     const [copied, setCopied] = useState(false);
     const [shareNote, setShareNote] = useState<string | null>(null);
     const canShare = typeof navigator.share === 'function';
     const canSpeak = 'speechSynthesis' in window;
 
     /* ---------- Preferences ---------- */
+    useEffect(() => {
+        if (!profileMessage || profileMessage === 'Device storage could not save your profile. These choices work for this visit only.') return;
+        const timer = setTimeout(() => setProfileMessage(null), 4500);
+        return () => clearTimeout(timer);
+    }, [profileMessage]);
+
     useEffect(() => {
         try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* ignore */ }
     }, [prefs]);
@@ -594,7 +616,7 @@ function ResidentPageContent() {
 
     /* ---------- Things the person does ---------- */
     function chooseDest(id: string) {
-        setBudgetOverride(null);
+        if (step !== 'where' && (id !== destId || returning || communityId)) { setBudgetOverride(null); setTripProfile(null); }
         setCommunityId(null);
         setMapFocus(undefined);
         setReturning(false);
@@ -604,21 +626,43 @@ function ResidentPageContent() {
         setEntranceId('');
         buzz();
     }
-    function changeWalkingNeeds(value: WalkingNeeds) {
-        const adjusted = normaliseNeeds(value);
-        const next = budgetOverride === null ? adjusted : { ...adjusted, budget_min: needs.budget_min };
-        if (budgetOverride !== null) setBudgetOverride(adjusted.budget_min);
-        setNeeds(next);
-        try { localStorage.setItem('townshipgo:walking-needs:v1', JSON.stringify(next)); } catch { /* storage may be unavailable */ }
-        setChosenMode(null);
+    function persistWalkingProfile(value: DeviceWalkingProfile) {
+        setDeviceProfile(value);
+        try {
+            writeDeviceWalkingProfile(localStorage, value);
+            return true;
+        } catch {
+            setProfileMessage('Device storage could not save your profile. These choices work for this visit only.');
+            return false;
+        }
     }
-    function chooseProfile(p: Profile) {
-        setChosenMode(null);
-        if (p !== profile) changeWalkingNeeds({ ...tripNeeds, speed_mps: null });
-        setProfile(p);
-        try { localStorage.setItem('townshipgo:selected-profile:v1', p); } catch { /* storage may be unavailable */ }
-        buzz();
+
+    function saveDefaultWalkingSettings(settings: WalkingSettings) {
+        const value = normaliseWalkingSettings(settings.profile, { ...settings.needs, budget_min: deviceProfile.settings.needs.budget_min });
+        if (persistWalkingProfile({ version: 1, status: 'complete', settings: value })) {
+            setProfileMessage('Your profile is saved.');
+        }
+        setTripProfile(null); setChosenMode(null); setProfileEditor(null);
     }
+
+    function dismissProfileSetup() {
+        if (deviceProfile.status === 'new') persistWalkingProfile({ ...deviceProfile, status: 'skipped' });
+        setShowProfileSetup(false);
+    }
+
+    function useSavedWalkingPace(speed: number) {
+        const settings = deviceProfile.settings;
+        saveDefaultWalkingSettings({ ...settings, needs: { ...settings.needs, speed_mps: speed } });
+        setLibraryMessage('Your personal pace is selected for this walking profile.');
+    }
+
+    function resetWalkingProfile() {
+        if (!window.confirm(t('Reset your saved walking profile and display preferences? Saved walks, history and reports will be kept.'))) return;
+        if (persistWalkingProfile({ ...newDeviceWalkingProfile(), status: 'skipped' })) setProfileMessage('Your walking profile has been reset.');
+        setPrefs({ ...DEFAULT_PREFS, mapMode: prefs.mapMode, reduceMotion: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false });
+        setTripProfile(null); setChosenMode(null); setShowProfilePrivacy(false);
+    }
+
     function chooseMode(m: Mode) {
         setChosenMode(m);
         buzz();
@@ -640,7 +684,7 @@ function ResidentPageContent() {
                     return;
                 }
                 initialOriginUsed.current = true;
-                if (communityId) { setCommunityId(null); setStep('where'); }
+                if (communityId) { setCommunityId(null); setStep('where'); setTripProfile(null); setBudgetOverride(null); }
                 setUserCoords(coords);
                 setMapFocus(undefined);
                 setUsingGPS(true);
@@ -656,7 +700,7 @@ function ResidentPageContent() {
 
     function chooseStart(point: StartPoint) {
         initialOriginUsed.current = true;
-        if (communityId) { setCommunityId(null); setStep('where'); }
+        if (communityId) { setCommunityId(null); setStep('where'); setTripProfile(null); setBudgetOverride(null); }
         setUserCoords(point.coordinates);
         setUsingGPS(false);
         setGeoMsg(null);
@@ -667,7 +711,7 @@ function ResidentPageContent() {
 
     function selectCommunity(route: CommunityRoute) {
         if (!route.path) return;
-        setBudgetOverride(null);
+        if (step !== 'where') { setTripProfile(null); setBudgetOverride(null); }
         setCommunityId(route.id);
         setUserCoords(route.path.coordinates[0]);
         setUsingGPS(false);
@@ -709,7 +753,9 @@ function ResidentPageContent() {
         setPanelMinimized(true);
         buzz(80);
         setStep('walking');
-        speak(`Your walk has started. About ${minutesOf(route)} minutes. ${route.return_walk ? 'Return to your starting point.' : `To ${route.destination.name}.`}`);
+        speak(language === 'ms'
+            ? `Perjalanan anda telah bermula. Kira-kira ${minutesOf(route)} minit. ${route.return_walk ? 'Kembali ke titik mula anda.' : `Ke ${route.destination.name}.`}`
+            : `Your walk has started. About ${minutesOf(route)} minutes. ${route.return_walk ? 'Return to your starting point.' : `To ${route.destination.name}.`}`);
     }
 
     function changeLibrary(next: WalkLibrary) {
@@ -719,23 +765,23 @@ function ResidentPageContent() {
     function finishRecording(walk: CompletedWalk) {
         const ok = changeLibrary({ ...libraryRef.current, history: [walk, ...libraryRef.current.history.filter(w => w.id !== walk.id)] });
         setPanelMinimized(false);
-        if (ok) setSessionFinished(true); return ok;
+        if (ok) { setSessionFinished(true); speak(t('Walk finished.')); } return ok;
     }
     function saveFeedback(id: string, feedback: WalkFeedback) {
         if (!libraryRef.current.history.some(w => w.id === id)) return false;
         return changeLibrary({ ...libraryRef.current, history: libraryRef.current.history.map(w => w.id === id ? { ...w, feedback } : w) });
     }
-    function planReturn(minutes: number) { setCommunityId(null); setReturning(true); setBudgetOverride(minutes); setEntranceId(''); setChosenMode(null); setStep('route'); setView('plan'); setPanelMinimized(false); }
+    function planReturn(minutes: number) { if (step !== 'where') setTripProfile(null); setCommunityId(null); setReturning(true); setBudgetOverride(minutes); setEntranceId(''); setChosenMode(null); setStep('route'); setView('plan'); setPanelMinimized(false); }
     function focusWalkPoint(point: [number, number]) { setMapFocus(point); requestAnimationFrame(()=>document.querySelector('.tg-map')?.scrollIntoView({block:'center',behavior:prefs.reduceMotion?'auto':'smooth'})); }
     function chooseFacility(asset: WalkingAsset) { chooseDest(asset.external_id || asset.id); setStep('route'); setView('plan'); setPanelMinimized(false); }
     function replanPack(pack: WalkPack) {
         const target=pack.area_id??'elmina';
         if(target!==area){if(walkSession&&!sessionFinished){setLibraryMessage('Finish the current walk before switching areas.');return;}
-            router.replace('/resident?'+new URLSearchParams({area:target,startLat:String(pack.origin[0]),startLng:String(pack.origin[1]),destId:pack.route.destination.external_id||pack.route.destination.id,profile:pack.profile,needs:JSON.stringify(pack.needs),...(pack.route.community_id ? { community: pack.route.community_id } : pack.route.return_walk ? {return:'1'} : {entrance:pack.route.entrance.id})}));return;}
+            router.replace('/resident?'+new URLSearchParams({area:target,startLat:String(pack.origin[0]),startLng:String(pack.origin[1]),destId:pack.route.destination.external_id||pack.route.destination.id,replan:pack.id,budget:String(pack.needs.budget_min),...(pack.route.community_id ? { community: pack.route.community_id } : pack.route.return_walk ? {return:'1'} : {entrance:pack.route.entrance.id})}));return;}
         setCommunityId(pack.route.community_id ?? null);
-        setUserCoords(pack.origin); setUsingGPS(false); setProfile(pack.profile);
+        setUserCoords(pack.origin); setUsingGPS(false);
         setBudgetOverride(pack.needs.budget_min);
-        setNeeds(normaliseNeeds({ ...pack.needs, budget_min: needs.budget_min }));
+        setTripProfile(normaliseWalkingSettings(pack.profile, { ...pack.needs, budget_min: deviceProfile.settings.needs.budget_min }));
         setMapFocus(undefined);
         setExactDestination(pack.route.destination.name);
         setReturning(!!pack.route.return_walk); setDestId(pack.route.destination.external_id || pack.route.destination.id); setEntranceId(pack.route.return_walk ? '' : pack.route.entrance.id);
@@ -775,6 +821,16 @@ function ResidentPageContent() {
 
     function readRouteAloud() {
         if (!activeRoute) return;
+        if (language === 'ms') {
+            speak(
+                `${activeRoute.return_walk ? 'Kembali ke titik mula anda' : `Ke ${activeRoute.destination.name}`}. ${t(routeLabel(shownMode, isNight, fastest))}. Kira-kira ${minutesOf(activeRoute)} minit, ${Math.round(activeRoute.length_m)} meter. ` +
+                `${activeRoute.verified_rest_stops} perhentian rehat disahkan. ` +
+                (activeRoute.sun_exposure && !isNight ? `Kira-kira ${Math.round(activeRoute.sun_exposure.sun_s / 60)} minit di bawah cahaya matahari langsung, ${Math.ceil(activeRoute.sun_exposure.unknown_s / 60)} minit dengan teduhan tidak diketahui. ` : '') +
+                `${activeRoute.unverified_crossings} lintasan perlu disemak. Tiba di ${activeRoute.entrance.name}. ${activeRoute.suitability === 'green' ? 'Laluan ini memenuhi keperluan anda dan semakan terkini.' : 'Laluan ini perlu disahkan.'}`,
+                true,
+            );
+            return;
+        }
         speak(
             `${activeRoute.return_walk ? 'Return to your starting point' : `To ${activeRoute.destination.name}`}. ${t(routeLabel(shownMode, isNight, fastest))} route. About ${minutesOf(activeRoute)} minutes, ` +
             `${Math.round(activeRoute.length_m)} metres. ${activeRoute.verified_rest_stops} verified rest stops. ` +
@@ -800,16 +856,17 @@ function ResidentPageContent() {
             startLat: String(origin[0]),
             startLng: String(origin[1]),
             destId: sharedRoute?.destination.external_id || sharedRoute?.destination.id || destId,
-            mode: shownMode,
-            profile: captured?.profile ?? profile,
-            needs: JSON.stringify(captured?.needs ?? tripNeeds),
+            mode: sharedRoute?.mode ?? shownMode,
+            budget: String(captured?.needs.budget_min ?? tripNeeds.budget_min),
             departure: sharedRoute?.departure_at ?? planningTime,
             ...(informationLayer === 'shade' ? { layer: 'shade' } : {}),
             ...(sharedRoute?.community_id ? { community: sharedRoute.community_id } : {}),
             ...(sharedRoute?.return_walk ? { return: '1' } : {}),
             ...(sharedRoute && !sharedRoute.return_walk ? { entrance: sharedRoute.entrance.id } : {}),
         });
-        setShareUrl(`${window.location.origin}${window.location.pathname}?${params.toString()}`);
+        setShareSettings({ profile: captured?.profile ?? profile, needs: captured?.needs ?? tripNeeds });
+        setSharePreferences(false);
+        setShareBaseUrl(`${window.location.origin}${window.location.pathname}?${params.toString()}`);
         setCopied(false);
         setShareNote(null);
         setShowShare(true);
@@ -937,7 +994,7 @@ function ResidentPageContent() {
                     ...(reportPhoto ? { photo: reportPhoto } : {}) },
                 ...deviceHazards]);
                 setReportMsg(t('Saved on this device'));
-                speak('Your report was saved on this device.');
+                speak(language === 'ms' ? 'Laporan anda disimpan pada peranti ini.' : 'Your report was saved on this device.');
             } else {
                 const { hazard, report } = await submitReport({
                     area_id: area, edge_id: reportAsset ? undefined : reportEdge?.id, asset_id: reportAsset?.id, lat, lng, kind: selectedKind, description: reportNotes, ...observation,
@@ -954,7 +1011,7 @@ function ResidentPageContent() {
                 setReportReceipts(receipt);
                 setReloadVersion(value => value + 1);
                 setReportMsg(t('Report sent to maintenance.'));
-                speak('Your report was sent.');
+                speak(language === 'ms' ? 'Laporan anda telah dihantar.' : 'Your report was sent.');
             }
             setReportNotes('');
             setAutoNote(null);
@@ -1031,23 +1088,23 @@ function ResidentPageContent() {
     const departureControl = <DepartureControl language={language} departure={planningTime} now={!departure} onChange={changeDeparture} revealTime={plan?.issue?.kind === 'closed'}
         onNow={() => { setDeparture(null); setPlanningNow(new Date().toISOString()); }} forecast={forecast} />;
 
-    const planningControls = <div className="space-y-3">
-        <div className="tg-quick-needs" role="group" aria-label={t('Walking needs')}>
-            <button type="button" className="tg-card" aria-pressed={tripNeeds.step_free || profile === 'wheelchair'} disabled={profile === 'wheelchair'}
-                onClick={() => changeWalkingNeeds({ ...tripNeeds, step_free: !tripNeeds.step_free })}>
-                <Accessibility size={18} aria-hidden />{t('Avoid stairs')}
-            </button>
-            <button type="button" className="tg-card" aria-pressed={tripNeeds.require_rests}
-                onClick={() => changeWalkingNeeds({ ...tripNeeds, require_rests: !tripNeeds.require_rests })}>
-                <Armchair size={18} aria-hidden />{t('Need places to rest')}
-            </button>
+    const planningControls = <div className="tg-plan-profile">
+        <div className="tg-plan-profile-line">
+            <span className="tg-profile-mini-icon"><UserRound size={19} aria-hidden /></span>
+            <div><strong>{t(tripProfile ? 'Using settings for this journey' : 'Using your walking profile')}</strong>
+                <p>{compactWalkingSummary(activeWalkingSettings, language)}</p></div>
+            <button type="button" className="tg-text-action" aria-label={t('Adjust for this journey')} onClick={() => setProfileEditor('trip')}><SlidersHorizontal size={17} aria-hidden />{t('Adjust')}</button>
         </div>
-        <WalkingRequirements language={language} needs={tripNeeds} profile={profile} onChange={changeWalkingNeeds} />
+        <label className="tg-plan-budget"><span><strong>{t('Total trip budget')}</strong><small>{t('Per journey')}</small></span>
+            <select className="tg-input" value={tripNeeds.budget_min} onChange={e => { setBudgetOverride(Number(e.target.value)); setChosenMode(null); }}>
+                {[...new Set([...WALK_BUDGETS, tripNeeds.budget_min])].sort((a,b) => a-b).map(n => <option key={n} value={n}>{n} min</option>)}
+            </select>
+        </label>
     </div>;
 
     const communityButton = <button type="button" className="tg-btn" disabled={!walkingData?.dataset_id}
         onClick={() => { setShortcutWalk(undefined); setShowCommunity(true); }}><RouteIcon size={18} aria-hidden />{t('Community routes')}</button>;
-    const localPlaces = <PlaceDiscovery snapshot={planningSnapshot} request={toolRequest} budget={needs.budget_min}
+    const localPlaces = <PlaceDiscovery snapshot={planningSnapshot} request={toolRequest} budget={tripNeeds.budget_min}
         onChoose={selectSearchResult} onReport={openAssetReport} language={language} />;
     const quickUpdate = <QuickConditionUpdate area={area} dataset={walkingData?.dataset_id} edges={edges.filter(e => activeRoute?.edge_ids.includes(e.id))} facilities={walkingData?.assets ?? []} onSave={saveUpdate} onShare={shareUpdate} />;
     const routeReady = Boolean(activeRoute && !loadingDb && !journeySearch.pending);
@@ -1072,6 +1129,7 @@ function ResidentPageContent() {
         if (routeIssue?.kind === 'start' || routeIssue?.kind === 'connection') {
             return { label: t('Choose a starting point'), run: () => { setStartQuery(''); setShowStartPicker(true); } };
         }
+        if (routeIssue?.kind === 'needs' || tripNeeds.require_rests || tripNeeds.verified_only) return { label: t('Adjust for this journey'), run: () => setProfileEditor('trip') };
         return null;
     }
     const failureAction = noRoute ? routeRecovery() : null;
@@ -1091,10 +1149,10 @@ function ResidentPageContent() {
                 <Link href="/" className="tg-brand" aria-label="TownshipGo home">
                     <span><Footprints size={19} aria-hidden /></span> TownshipGo
                 </Link>
-                <PilotSelector area={area} onChange={changeArea} language={language} />
+                {view !== 'profile' && <PilotSelector area={area} onChange={changeArea} language={language} />}
                 <button className="tg-iconbtn" onClick={() => setShowSettings(true)} aria-label={t('Text size and display settings')}>Aa</button>
             </header>
-            {view !== 'saved' && view !== 'walk' && (
+            {view === 'plan' && (
                 <div className="tg-trip-fields">
                 <button type="button" className="tg-start-field" onClick={() => { setSearchOpen(false); setStartQuery(''); setShowStartPicker(true); }} aria-haspopup="dialog">
                     <CircleDot size={19} aria-hidden /><span>{t('From')}</span><strong>{originLabel}</strong><ChevronDown size={16} aria-hidden />
@@ -1130,12 +1188,12 @@ function ResidentPageContent() {
                 </form>
                 </div>
             )}
-            {geoMsg && !showStartPicker && <p className="tg-banner" role="status">{geoMsg}</p>}
+            {view === 'plan' && geoMsg && !showStartPicker && <p className="tg-banner" role="status">{geoMsg}</p>}
             {libraryMessage && <div role="status" className="tg-banner tg-app-message"><p>{libraryMessage}</p>
                 <button type="button" className="tg-close" aria-label={t('Close')} onClick={() => setLibraryMessage(null)}><X size={18} aria-hidden /></button>
             </div>}
 
-            {dataError && (
+            {view !== 'profile' && dataError && (
                 <div role="alert" className="tg-banner">
                     <span>We could not load the walking paths.</span>
                     <button className="tg-btn" style={{ width: 'auto' }} onClick={() => {
@@ -1187,7 +1245,7 @@ function ResidentPageContent() {
                     </button>}
             </div>
 
-            <section id="walk-planning" aria-label={t('Walk planning')} tabIndex={-1} className="tg-sheet">
+            <section id="walk-planning" aria-label={t(view === 'profile' ? 'My walking profile' : 'Walk planning')} tabIndex={-1} className="tg-sheet">
                 {view === 'plan' && !pickingHazard && <div className="tg-sheet-preview">
                     <div className="tg-sheet-handle" aria-hidden />
                     <div className="tg-sheet-row">
@@ -1225,8 +1283,15 @@ function ResidentPageContent() {
                 </div>}
 
                 {view !== 'walk' && <div id="walking-panel" className="tg-panel-body">
-                    {view === 'saved' && <SavedWalks library={library} profile={profile} pace={needs.speed_mps} area={area} reports={reports} onChange={changeLibrary} onReplan={replanPack} onFeedback={saveFeedback}
-                        onUsePace={speed => { changeWalkingNeeds({ ...tripNeeds, speed_mps: speed }); setLibraryMessage('Your personal pace is selected for this walking profile.'); }} onShare={shareUpdate} />}
+                    {view === 'saved' && <SavedWalks library={library} profile={deviceProfile.settings.profile} pace={deviceProfile.settings.needs.speed_mps} area={area} reports={reports} onChange={changeLibrary} onReplan={replanPack} onFeedback={saveFeedback}
+                        onUsePace={useSavedWalkingPace} onShare={shareUpdate} />}
+                    {view === 'profile' && <WalkingProfilePanel profile={deviceProfile} language={language}
+                        savedCount={library.packs.length + library.history.length} communityReady={Boolean(walkingData?.dataset_id)}
+                        onEdit={() => setProfileEditor('default')} onSetup={() => setShowProfileSetup(true)}
+                        onDisplay={() => setShowSettings(true)} onSaved={() => setView('saved')}
+                        onReports={() => { setReportMsg(null); setShowReportHistory(true); }}
+                        onCommunity={() => { setShortcutWalk(undefined); setShowCommunity(true); }}
+                        onPrivacy={() => setShowProfilePrivacy(true)} />}
                     {view === 'plan' && !panelMinimized && !pickingHazard && <div className="tg-stack">
                         {!!accessNotices.length && <AccessNotices notices={accessNotices} onFocus={focusWalkPoint} />}
                         {nearbyWeatherWarning && <WeatherWarningList feed={warningFeed} now={planningNow} />}
@@ -1247,13 +1312,6 @@ function ResidentPageContent() {
                             <details className="tg-details">
                                 <summary>{t('More walking options')}</summary>
                                 <div className="tg-stack mt-3">
-                                    <div role="group" aria-label="Who is walking" className="grid grid-cols-2 gap-2">
-                                        {(Object.keys(PROFILES) as Profile[]).map(p => <button key={p} type="button" aria-pressed={profile === p}
-                                            className="tg-card tg-card-center" onClick={() => chooseProfile(p)}>
-                                            {profile === p && <Check size={18} aria-hidden />}{PROFILES[p].label}
-                                        </button>)}
-                                    </div>
-                                    <PaceCalibration history={library.history} profile={profile} current={needs.speed_mps} onUse={speed => changeWalkingNeeds({ ...tripNeeds, speed_mps: speed })} />
                                     <button type="button" className="tg-text-action text-left" onClick={() => setReloadVersion(version => version + 1)}>Refresh paths and checks</button>
                                     <Link href={'/verification?area=' + area} className="inline-flex min-h-11 items-center font-bold underline">Places and verification coverage</Link>
                                     <PilotSources area={area} context={pilotData ?? undefined} />
@@ -1267,7 +1325,7 @@ function ResidentPageContent() {
                                     <p className="tg-small">{communityId ? selectedCommunity?.title ?? t('Community routes') : returning ? t('Return to your starting point') : t('To') + ' ' + currentDest.name}</p>
                                 </div>
                                 <button type="button" aria-label={t('Close route options')} className="tg-close" onClick={() => {
-                                    setCommunityId(null); setStep('where'); setReturning(false); setBudgetOverride(null); setChosenMode(null); setPanelMinimized(true);
+                                    setCommunityId(null); setStep('where'); setReturning(false); setBudgetOverride(null); setTripProfile(null); setChosenMode(null); setPanelMinimized(true);
                                 }}><X size={20} aria-hidden /></button>
                             </div>
                             {noRoute && <div className="tg-note tg-warnbox" role="status">
@@ -1277,7 +1335,7 @@ function ResidentPageContent() {
                             </div>}
                             {departureControl}
                             {plan && activeRoute && <>
-                                    <RouteComparison routes={plan.routes} modes={visibleModes} chosen={shownMode} fastest={fastest} night={isNight} language={language}
+                                    <RouteComparison routes={plan.routes} modes={visibleModes} chosen={shownMode} fastest={fastest} night={isNight} language={language} recommended={plan.recommended}
                                         onChoose={mode => { chooseMode(mode); setMapFocus(undefined); }} />
                                     <div className="flex flex-wrap gap-x-4">
                                         {shadeModel && <button type="button" className="tg-text-action" aria-pressed={informationLayer === 'shade'}
@@ -1327,11 +1385,11 @@ function ResidentPageContent() {
                 </div>}
 
                 {walkSession && <div className="tg-recorder" hidden={view !== 'walk'}>
-                    <WalkRecorder key={walkSession.id} session={walkSession} language={language} onComplete={finishRecording} onFeedback={saveFeedback} onPosition={setLivePoint}
+                    <WalkRecorder key={walkSession.id} session={walkSession} language={language} voiceEnabled={prefs.speak && view === 'walk'} onComplete={finishRecording} onFeedback={saveFeedback} onPosition={setLivePoint}
                         onShareShortcut={walkingData?.dataset_id ? walk => { setShortcutWalk(walk); setShowCommunity(true); } : undefined}
                         panelControl={!pickingHazard && <PanelGrip state={panelState} language={language} controls="walk-recording-controls"
                             openLabel={activeWalkReports.length ? 'Conditions changed' : 'Walk controls'} onChange={setPanelState} />}
-                        onNewWalk={() => { setWalkSession(null); setLivePoint(null); setBudgetOverride(null); setView('plan'); setStep('where'); setPanelMinimized(true); }}>
+                        onNewWalk={() => { setWalkSession(null); setLivePoint(null); setBudgetOverride(null); setTripProfile(null); setView('plan'); setStep('where'); setPanelMinimized(true); }}>
                         {activeWalkReports.length > 0 && <div role="status" className="tg-note tg-warnbox">
                             <p className="font-bold">{t('Conditions changed')}</p>
                             <ul className="list-disc pl-5">{activeWalkReports.map(report => <li key={report.id}>{report.location_name} · {report.description}</li>)}</ul>
@@ -1359,9 +1417,44 @@ function ResidentPageContent() {
                         requestAnimationFrame(() => document.getElementById('walk-planning')?.focus({ preventScroll: true }));
                     }}><Icon size={21} aria-hidden />{t(label)}</button>)}
                 <button type="button" onClick={() => { setReportMsg(null); setShowReportHistory(true); }}><ClipboardList size={21} aria-hidden />{t('Reports')}</button>
+                <button type="button" aria-current={view === 'profile' ? 'page' : undefined} onClick={() => {
+                    setView('profile'); setSearchOpen(false); setPickingHazard(false);
+                    requestAnimationFrame(() => document.getElementById('walk-planning')?.focus({ preventScroll: true }));
+                }}><UserRound size={21} aria-hidden />{t('Profile')}</button>
             </nav>
 
             {/* ---------------- Dialogs ---------------- */}
+
+            {showProfileSetup && <Sheet title={t('Set up your walking profile')} onClose={dismissProfileSetup} language={language}>
+                <WalkingProfileSetup initial={deviceProfile.settings} display={{ language, scale: prefs.scale, speak: prefs.speak }} canSpeak={canSpeak} firstTime={deviceProfile.status === 'new'}
+                    onDismiss={dismissProfileSetup} onSave={(settings, display) => {
+                        saveDefaultWalkingSettings(settings);
+                        setPrefs(p => ({ ...p, ...display }));
+                        setShowProfileSetup(false);
+                    }} />
+            </Sheet>}
+
+            {profileEditor && <Sheet title={t(profileEditor === 'trip' ? 'Adjust for this journey' : 'Edit walking profile')} language={language} onClose={() => setProfileEditor(null)}>
+                <WalkingProfileEditor initial={profileEditor === 'trip' ? activeWalkingSettings : deviceProfile.settings} language={language}
+                    trip={profileEditor === 'trip'} hasOverride={Boolean(tripProfile)} onClose={() => setProfileEditor(null)} onSave={saveDefaultWalkingSettings}
+                    onResetTrip={() => { setTripProfile(null); setChosenMode(null); setProfileEditor(null); }}
+                    onUseTrip={settings => {
+                        setTripProfile(normaliseWalkingSettings(settings.profile, { ...settings.needs, budget_min: deviceProfile.settings.needs.budget_min }));
+                        setChosenMode(null); setProfileEditor(null); setProfileMessage('Profile updated for this journey only.');
+                    }} />
+            </Sheet>}
+
+            {showProfilePrivacy && <Sheet title={t('Privacy and reset')} language={language} onClose={() => setShowProfilePrivacy(false)}>
+                <div className="tg-stack">
+                    <p className="tg-note flex items-start gap-2"><LockKeyhole size={20} className="shrink-0" aria-hidden />{t('Your walking settings and display preferences are kept in this browser, not in an account. They are not included in a shared route link unless you choose to include them.')}</p>
+                    <p className="tg-small">{t('Planning uses your selected walking area, start and destination. Saved walk packs can include the walking requirements used to plan them.')}</p>
+                    <p className="tg-small">{t('Resetting does not delete walks, shortcuts or reports you have already saved or submitted.')}</p>
+                    <button type="button" className="tg-btn tg-btn-outline" onClick={resetWalkingProfile}>{t('Reset walking profile')}</button>
+                </div>
+            </Sheet>}
+
+            {profileMessage && <div role="status" className="tg-profile-notice"><span>{t(profileMessage)}</span><button className="tg-close" type="button" aria-label={t('Close')} onClick={() => setProfileMessage(null)}><X size={19} aria-hidden /></button></div>}
+
 
             {showCommunity && walkingData?.dataset_id && <Sheet title={t(shortcutWalk ? 'Share a local shortcut' : 'Community routes')} language={language}
                 onClose={() => { setShowCommunity(false); setShortcutWalk(undefined); }}>
@@ -1449,8 +1542,8 @@ function ResidentPageContent() {
                         />
                         {canSpeak && (
                             <SettingSwitch
-                                label={t('Speak updates')} language={language}
-                                hint="Says out loud when your walk starts, ends or a report is sent"
+                                label={t('Spoken directions and updates')} language={language}
+                                hint={t('Hear route updates when GPS guidance is enabled.')}
                                 checked={prefs.speak}
                                 onChange={(v) => setPref('speak', v)}
                             />
@@ -1461,8 +1554,12 @@ function ResidentPageContent() {
             )}
 
             {showShare && (
-                <Sheet title="Share your walk" onClose={() => setShowShare(false)}>
+                <Sheet title="Share your walk" onClose={() => setShowShare(false)} language={language}>
                     <div className="tg-stack">
+                        <label className="tg-card tg-share-privacy">
+                            <input type="checkbox" checked={sharePreferences} onChange={e => { setSharePreferences(e.target.checked); setCopied(false); setShareNote(null); }} />
+                            <span><strong>{t('Include walking preferences in the link')}</strong><small>{t('Anyone with the link can read the included walking requirements.')}</small></span>
+                        </label>
                         <p className="tg-note" style={{ margin: 0, userSelect: 'text' }}>
                             {shareMessage}
                             <br />
@@ -1495,7 +1592,7 @@ function ResidentPageContent() {
                         </div>
 
                         <p className="tg-small" style={{ margin: 0 }}>
-                            Whoever opens the link sees the same route you chose. It does not track you live.
+                            {t('The link opens your selected start, destination and time. Route choices use the recipient’s walking profile unless you include yours. It does not track you live.')}
                         </p>
                     </div>
                 </Sheet>
@@ -1552,7 +1649,7 @@ function ResidentPageContent() {
                                 </select>
                             </label>}
                             <div className="grid grid-cols-2 gap-2">
-                                <button type="button" className="tg-btn" onClick={() => { setShowReportModal(false); if (view === 'saved') setView('plan'); setPickingHazard(true); }}>{t('Pick on map')}</button>
+                                <button type="button" className="tg-btn" onClick={() => { setShowReportModal(false); if (view === 'saved' || view === 'profile') setView('plan'); setPickingHazard(true); }}>{t('Pick on map')}</button>
                                 <button type="button" className="tg-btn" disabled={reportLocated} onClick={locateReport}>{t(reportLocated ? 'Finding…' : 'My location')}</button>
                             </div>
                         </div>

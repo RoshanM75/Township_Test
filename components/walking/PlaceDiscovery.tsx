@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { usePlannerResult } from '@/lib/use-planner';
+import { requiresStepFreeProfile } from '@/lib/routing';
 import { metres } from '@/lib/walking-geometry';
 import { spotDetails } from '@/lib/shade-display';
 import { solarModel } from '@/lib/solar-shade';
@@ -45,7 +46,7 @@ export default function PlaceDiscovery({ snapshot, request, budget, onChoose, on
     const search = usePlannerResult<PlaceResult[]>(snapshot,
         { type: 'discover', input: request, ids: matching.slice(0, limit).map(asset => asset.id) }, opened && matching.length > 0);
     const shown = (search.result ?? []).filter(item => item.route || showUnavailable);
-    const mobility = request.needs.step_free || request.profile === 'wheelchair';
+    const mobility = request.needs.step_free || requiresStepFreeProfile(request.profile);
     const unavailable = useMemo(() => unavailableAssetIds(snapshot?.hazards ?? [], mobility), [snapshot?.hazards, mobility]);
     const facilities = useMemo(() => snapshot?.walking.assets.filter(asset =>
         (asset.kind === 'rest' || asset.kind === 'toilet') && asset.edge_id !== null && !unavailable.has(asset.id)) ?? [],

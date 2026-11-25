@@ -27,7 +27,7 @@ test('sample places belong to the imported precinct and have pedestrian routes',
         const entrance={...place,id:String(1001+index*2),external_id:null,kind:'entrance',parent_id:place.id,
             edge_id:edge.id,edge_fraction:edge.from_node===nodeId?0:1,connection_distance_m:0,anchor_lat:place.lat,anchor_lng:place.lng};
         const walking={assets:[place,entrance],verifications:[],as_of:'2026-11-17T04:00:00Z'};
-        for (const profile of ['senior', 'cane_walker', 'wheelchair']) {
+        for (const profile of ['everyday', 'senior', 'cane_walker', 'wheelchair', 'stroller']) {
             const plan = planRoutes(graph, DEFAULT_ORIGIN, destination.coords, profile, 'midday', []);
             assert.ok(plan.routes.direct, `${profile} must have a sample walk to ${destination.name}`);
             assert.ok(plan.routes.direct.length_m > 50);
