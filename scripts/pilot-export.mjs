@@ -46,6 +46,7 @@ export function attachPilotDetails(bundle,supplement){
     const {walking_details,transit,demand,demographics,landmarks,environment}=context;
     const paths=new Set(bundle.graph.edges.map(edge=>String(edge.id)));
     const assets=new Set(bundle.walking.assets.map(asset=>asset.id));
+    const detailTargets=new Set([...assets,...entrances.map(asset=>asset.id)]);
     for(const [id,fields] of Object.entries(walking_details.paths)){
         assert.ok(paths.has(id),'Mapped path details reference another dataset.');
         for(const [field,value] of Object.entries(fields)){
@@ -57,10 +58,12 @@ export function attachPilotDetails(bundle,supplement){
         }
     }
     for(const [id,fields] of Object.entries(walking_details.facilities)){
-        assert.ok(assets.has(id),'Mapped facility details reference another dataset.');
+        assert.ok(detailTargets.has(id),'Mapped facility details reference another dataset.');
         for(const [field,value] of Object.entries(fields)){
             const valid=field==='clear_width_m'?Number.isFinite(value)&&value>=.1&&value<=30:
-                ['accessible_toilet','water_available','armrests','backrest','step_free'].includes(field)&&typeof value==='boolean';
+                field==='public_access'?['public','customers','destination','permission','private'].includes(value):
+                ['osm_amenity','osm_shop','osm_level','opening_hours'].includes(field)?typeof value==='string'&&value.length>0&&value.length<=1000:
+                ['accessible_toilet','water_available','armrests','backrest','step_free','fee','has_seat'].includes(field)&&typeof value==='boolean';
             assert.ok(valid,`Invalid mapped facility detail: ${field}.`);
         }
     }

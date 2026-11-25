@@ -23,9 +23,10 @@ export interface NewReport {
     reported_by_proxy: boolean;
     observed_at?: string;
     shade_change?: ShadeChange;
+    requested_field?:string;
 }
 
-const HAZARD_KINDS = ['blocked', 'no_ramp', 'light_out', 'no_shade', 'broken_surface', 'lift_out', 'details_outdated', 'shade_correction'];
+const HAZARD_KINDS = ['blocked', 'no_ramp', 'light_out', 'no_shade', 'broken_surface', 'lift_out', 'details_outdated', 'shade_correction', 'check_requested'];
 
 export function validateReport(body: unknown): NewReport {
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new RequestError('A report object is required.');
@@ -52,6 +53,10 @@ export function validateReport(body: unknown): NewReport {
     if (reported_by_proxy !== undefined && typeof reported_by_proxy !== 'boolean') {
         throw new RequestError('The proxy reporting flag must be a boolean.');
     }
+    if (kind === 'check_requested' && edge_id === undefined && !asset_id) throw new RequestError('Choose the specific path, crossing or facility to check.');
+    const requested_field=input.requested_field;
+    if(requested_field!==undefined && (kind!=='check_requested'||typeof requested_field!=='string'||!/^[a-z][a-z_]{1,49}$/.test(requested_field)))
+        throw new RequestError('Choose a supported field to check.');
     let shade: Pick<NewReport, 'observed_at' | 'shade_change'> = {};
     if (kind === 'shade_correction') {
         const change = input.shade_change as ShadeChange;
@@ -61,7 +66,7 @@ export function validateReport(body: unknown): NewReport {
         if (!observed || Date.parse(observed) > Date.now() + 60000) throw new RequestError('Enter the date and time you observed the change.');
         shade = { observed_at: observed, shade_change: change };
     }
-    return { lat, lng, kind: kind as HazardKind, edge_id: edge_id as number | undefined, ...shade,
+    return { lat, lng, kind: kind as HazardKind, edge_id: edge_id as number | undefined, ...shade, ...(typeof requested_field==='string'?{requested_field}:{}),
         description: (description as string | undefined)?.trim() ?? '', reported_by_proxy: reported_by_proxy === true, ...(typeof asset_id === 'string' ? { asset_id } : {}), ...(isPilot(area_id)?{area_id}:{}) };
 }
 

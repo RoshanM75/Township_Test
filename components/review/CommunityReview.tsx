@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { loadCommunityQueue, reviewCommunityRoute } from '@/lib/api';
-import { communityStatusLabel, type CommunityRoute, type RoutePoint } from '@/lib/community-routes';
+import { GUIDE_LABELS, communityStatusLabel, type CommunityRoute, type RoutePoint } from '@/lib/community-routes';
 import type { PilotId } from '@/lib/pilots';
 import { CommunityPathMap, communityDate } from '@/components/walking/CommunityRoutes';
 
@@ -64,7 +64,10 @@ export default function CommunityReview({ area, reviewerKey }: { area: PilotId; 
         </label>}
         {selected && <div className="space-y-3">
             <CommunityPathMap area={area} points={selected.path?.coordinates ?? selected.points} />
+            <p className="font-bold">{GUIDE_LABELS[selected.guide_kind??'general']}</p>
             <p className="break-words">{selected.notes}</p>
+            {!!selected.reviews?.length&&<details className="text-sm"><summary className="cursor-pointer min-h-11 font-bold">Review history</summary>
+                <ul className="space-y-1">{selected.reviews.map((review,i)=><li key={review.checked_at+i}>{review.action} · {communityDate(review.checked_at)} · {review.reviewer}<br/>{review.note}</li>)}</ul></details>}
             <p className="text-sm">{selected.path ? `${selected.path.length_m} m on ${selected.path.edge_ids.length} mapped paths`
                 : 'The proposal contains a gap or cannot be matched. Review it for a future map update.'} · Submitted {communityDate(selected.created_at)}</p>
             {selected.path && <details className="text-sm">

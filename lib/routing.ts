@@ -12,7 +12,7 @@ export type DataSource = 'audited' | 'reported' | 'modelled' | 'assumed';
 export type Profile = 'everyday' | 'senior' | 'cane_walker' | 'wheelchair' | 'stroller';
 export type TimeSlot = 'morning' | 'midday' | 'afternoon' | 'night';
 export type Mode = 'direct' | 'coolest' | 'sheltered' | 'safest';
-export type HazardKind = 'blocked' | 'no_ramp' | 'light_out' | 'no_shade' | 'broken_surface' | 'lift_out' | 'details_outdated' | 'shade_correction';
+export type HazardKind = 'blocked' | 'no_ramp' | 'light_out' | 'no_shade' | 'broken_surface' | 'lift_out' | 'details_outdated' | 'shade_correction' | 'check_requested';
 export type HazardStatus = 'open' | 'verified' | 'fixed';
 
 export interface PathNode {

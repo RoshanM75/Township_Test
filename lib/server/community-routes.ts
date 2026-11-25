@@ -5,11 +5,11 @@ import { readGraph } from './repository.ts';
 import { RequestError } from './validation.ts';
 import { openingAt } from '../verification.ts';
 import { pointInPilot, type PilotId } from '../pilots.ts';
-import { matchCommunityPath, MAX_COMMUNITY_POINTS, type RoutePoint } from '../community-routes.ts';
+import { matchCommunityPath, MAX_COMMUNITY_POINTS, GUIDE_KINDS, type RoutePoint } from '../community-routes.ts';
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const FIELDS = `id, area_id, dataset_id, title, notes, status, matched_path AS path, created_at, published_at,
-    checked_at, valid_until, opening_hours, reviewer, review_note`;
+    checked_at, valid_until, opening_hours, reviewer, review_note, guide_kind`;
 
 export function communityId(value: unknown) {
     if (typeof value !== 'string' || !UUID.test(value)) throw new RequestError('The route identifier is invalid.');
@@ -17,7 +17,11 @@ export function communityId(value: unknown) {
 }
 
 export async function readCommunityRoutes(area: PilotId, reviewer: boolean, receipt?: string, id?: string) {
-    const { rows } = await getPool().query(`SELECT ${FIELDS}${reviewer ? ', points' : ''} FROM community_routes
+    const { rows } = await getPool().query(`SELECT ${FIELDS}${reviewer ? ', points' : ''},
+        COALESCE((SELECT jsonb_agg(to_jsonb(events) ORDER BY events.checked_at DESC,events.id DESC)
+            FROM (SELECT id,action,reviewer,note,checked_at,opening_hours,valid_until FROM community_route_reviews
+                WHERE route_id=community_routes.id ORDER BY checked_at DESC,id DESC LIMIT 20) events),'[]'::jsonb) AS reviews
+        FROM community_routes
         WHERE area_id=$1 AND ($2 OR status IN ('published','verified') OR submission_id=$3)
         ORDER BY (coalesce(id=$4, false) OR coalesce(submission_id=$3, false)) DESC, created_at DESC LIMIT 100`, [area, reviewer, receipt ?? null, id ?? null]);
     return rows;
@@ -29,6 +33,8 @@ export async function submitCommunityRoute(area: PilotId, value: unknown) {
     const title = typeof body?.title === 'string' ? body.title.trim() : '';
     const notes = typeof body?.notes === 'string' ? body.notes.trim() : '';
     if (!title || title.length > 100 || notes.length > 800) throw new RequestError('Enter a route name and notes of up to 800 characters.');
+    const guide = body?.guide_kind ?? 'general';
+    if (!GUIDE_KINDS.includes(guide as typeof GUIDE_KINDS[number])) throw new RequestError('Choose a supported local guide type.');
     const points = body?.points;
     if (!Array.isArray(points) || points.length < 2 || points.length > MAX_COMMUNITY_POINTS || points.some(point =>
         !Array.isArray(point) || point.length !== 2 || !point.every(x => typeof x === 'number' && Number.isFinite(x)) ||
@@ -43,10 +49,10 @@ export async function submitCommunityRoute(area: PilotId, value: unknown) {
     if (existing.rows[0]) return existing.rows[0];
     const { nodes, edges } = await readGraph(area);
     const path = matchCommunityPath(nodes, edges, points);
-    const { rows } = await pool.query(`INSERT INTO community_routes (area_id, dataset_id, submission_id, title, notes, points, matched_path)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+    const { rows } = await pool.query(`INSERT INTO community_routes (area_id, dataset_id, submission_id, title, notes, points, matched_path,guide_kind)
+        VALUES ($1, $2, $3, $4, $5, $6, $7,$8)
         ON CONFLICT (area_id, submission_id) DO UPDATE SET submission_id=EXCLUDED.submission_id
-        RETURNING ${FIELDS}`, [area, context.dataset_id, submission, title, notes, JSON.stringify(points), path ? JSON.stringify(path) : null]);
+        RETURNING ${FIELDS}`, [area, context.dataset_id, submission, title, notes, JSON.stringify(points), path ? JSON.stringify(path) : null,guide]);
     return rows[0];
 }
 
@@ -87,8 +93,12 @@ export async function reviewCommunityRoute(area: PilotId, id: string, value: unk
             valid_until=CASE WHEN $2='verified' THEN NOW()+INTERVAL '90 days' ELSE NULL END,
             opening_hours=CASE WHEN $2='verified' THEN $5 ELSE opening_hours END
             WHERE id=$1 RETURNING ${FIELDS}`, [id, status, reviewer, note, hours]);
+        await client.query(`INSERT INTO community_route_reviews(route_id,action,reviewer,note,opening_hours,valid_until)
+            VALUES($1,$2,$3,$4,$5,$6)`,[id,action,reviewer,note,action==='verify'?hours:null,rows[0].valid_until]);
+        const history=(await client.query(`SELECT action,reviewer,note,checked_at,opening_hours,valid_until FROM community_route_reviews
+            WHERE route_id=$1 ORDER BY checked_at DESC,id DESC LIMIT 20`,[id])).rows;
         await client.query('COMMIT');
-        return rows[0];
+        return {...rows[0],reviews:history};
     } catch (error) {
         await client.query('ROLLBACK');
         throw error;

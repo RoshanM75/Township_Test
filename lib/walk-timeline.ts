@@ -2,7 +2,7 @@ import type { JourneyRoute, VerificationRecord } from './walking.ts';
 import type { PathEdge } from './routing.ts';
 import { evidenceFor } from './verification.ts';
 
-export interface TimelineItem { id: string; title: string; detail: string; start_min: number; end_min: number; distance_m: number; edge_id?: number; point: [number, number]; kind: 'path' | 'crossing' | 'rest' | 'connection' | 'turn' | 'arrival' }
+export interface TimelineItem { id: string; title: string; detail: string; start_min: number; end_min: number; distance_m: number; edge_id?: number; point: [number, number]; kind: 'path' | 'crossing' | 'rest' | 'connection' | 'turn' | 'errand' | 'arrival' }
 export type WalkLanguage = 'en' | 'ms';
 
 export function walkTimeline(route: JourneyRoute, edges: PathEdge[], records: VerificationRecord[], language: WalkLanguage = 'en'): TimelineItem[] {
@@ -22,13 +22,15 @@ export function walkTimeline(route: JourneyRoute, edges: PathEdge[], records: Ve
             const rendered = typeof value === 'boolean' ? (value ? say('yes', 'ya') : say('no', 'tidak')) : `${value}${unit}`;
             return `${name} ${rendered} (${fact?.status === 'verified' ? say('checked', 'disemak') : fact?.status === 'reported' ? say('reported', 'dilaporkan') : say('mapped', 'dipetakan')})`;
         };
-        const kind = step.kind === 'turn' ? 'turn' : step.kind === 'rest' ? 'rest' : step.kind === 'connection' ? 'connection' : edge?.is_crossing ? 'crossing' : 'path';
+        const kind = step.kind === 'turn' ? 'turn' : step.kind === 'rest' ? 'rest' : step.kind==='errand'?'errand': step.kind === 'connection' ? 'connection' : edge?.is_crossing ? 'crossing' : 'path';
         const title = kind === 'crossing' ? `${say('Crossing', 'Lintasan')} · ${step.name}`
+            : kind==='errand'? `${say('Visit','Singgah')} · ${step.name}`
             : kind === 'rest' ? `${say('Rest', 'Rehat')} · ${step.name}`
             : kind === 'turn' ? say(step.name, 'Mula perjalanan pulang')
             : step.name.startsWith('Footpath ') ? say('Follow the mapped footpath', 'Ikut laluan pejalan kaki pada peta') : step.name;
         const detail = kind === 'turn' ? say('Follow the return path. Your planned rest intervals still apply.',
             'Ikut laluan pulang dan teruskan rehat mengikut jadual.')
+            : kind==='errand'?say('Time at this destination; not a verified rest','Masa di destinasi; bukan rehat disahkan')
             : kind === 'rest' ? say('Planned rest, including the connection to the facility', 'Rehat terancang termasuk laluan ke tempat rehat')
             : kind === 'connection' ? say('Check the connection on site', 'Semak sambungan laluan di lokasi')
             : [covered === true ? say('Roof cover recorded', 'Bumbung direkodkan')
@@ -48,7 +50,7 @@ export function walkTimeline(route: JourneyRoute, edges: PathEdge[], records: Ve
             previous.end_min = step.end_min; previous.distance_m += step.distance_m;
         } else result.push({ id: `step-${index}`, title, detail, kind, start_min: step.start_min, end_min: step.end_min, distance_m: step.distance_m, ...(step.edge_id === undefined ? {} : { edge_id: step.edge_id }), point: step.coordinates[0] });
     }
-    result.push({ id: 'arrival', title: route.return_walk ? say('Back at your start', 'Kembali ke titik mula') : `${say('Arrive', 'Tiba')} · ${route.entrance.name}`, kind: 'arrival', start_min: route.total_min,
+    result.push({ id: 'arrival', title: route.return_walk || route.errand_returns ? say('Back at your start', 'Kembali ke titik mula') : `${say('Arrive', 'Tiba')} · ${route.entrance.name}`, kind: 'arrival', start_min: route.total_min,
         end_min: route.total_min, distance_m: 0, point: route.coordinates.at(-1)!, detail: say('Times are estimates. Conditions may change during the walk.', 'Masa adalah anggaran. Keadaan boleh berubah semasa berjalan.') });
     return result;
 }

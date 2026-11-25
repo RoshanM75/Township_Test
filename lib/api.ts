@@ -27,7 +27,7 @@ export interface ReportInput {
     description?: string;
     reported_by_proxy?: boolean;
     observed_at?: string;
-    shade_change?: ShadeChange;
+    shade_change?: ShadeChange; requested_field?:string;
 }
 
 async function request<T>(url: string, options?: RequestInit,area?:PilotId): Promise<T> {

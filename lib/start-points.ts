@@ -8,6 +8,7 @@ export interface StartPoint {
     id: string;
     label: string;
     coordinates: [number, number];
+    asset_id?: string;
 }
 
 export function presetStartPoints(context: PilotContext, assets: WalkingAsset[], graph: Graph): StartPoint[] {
@@ -52,9 +53,9 @@ export function presetStartPoints(context: PilotContext, assets: WalkingAsset[],
             || entrance.properties.connection_model !== 'mapped_entrance' || entrance.edge_id === null || entrance.edge_fraction === null) return [];
         const edge = graph.edges.get(entrance.edge_id);
         if (!edge || !visited.has(edge.from_node) || !visited.has(edge.to_node)) return [];
-        const [lng, lat] = pointAt(edge.geometry, entrance.edge_fraction);
-        const coordinates: [number, number] = [lat, lng];
-        return pointInPilot(coordinates, context.area_id) ? [{ id: entrance.id, label: entrance.name, coordinates }] : [];
+        const coordinates: [number, number] = [entrance.lat,entrance.lng];
+        return pointInPilot(coordinates, context.area_id) && (entrance.connection_distance_m??Infinity)<=100
+            ? [{ id: entrance.id, label: entrance.name, coordinates,asset_id:entrance.id }] : [];
     });
     for (const point of [...nearbyStarts, ...entrances]) {
         if (!options.some(option => option.coordinates[0] === point.coordinates[0] && option.coordinates[1] === point.coordinates[1])) options.push(point);

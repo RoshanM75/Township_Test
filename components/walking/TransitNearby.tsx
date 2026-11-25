@@ -5,18 +5,25 @@ import { BusFront, MapPin } from 'lucide-react';
 import { scheduledService, transitDestinationId, TRANSIT_LABELS } from '@/lib/transit';
 import { metres } from '@/lib/walking-geometry';
 import type { PilotContext } from '@/lib/pilots';
-import type { WalkingAsset } from '@/lib/walking';
+import { assetFacts, conditionState, accessTerms } from '@/lib/route-conditions';
+import { sitePath } from '@/lib/site';
+import { stateNames } from './JourneyReadiness';
+import { unavailableAssetIds } from '@/lib/report-status';
+import type { HazardReport } from '@/lib/routing';
+import type { WalkingData, WalkingAsset } from '@/lib/walking';
 
 const clock = new Intl.DateTimeFormat('en-MY', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kuala_Lumpur' });
 const serviceTime = (time: string) => clock.format(new Date(time));
 
-export default function TransitNearby({ context, assets, origin, at, onChoose, onFocus }: {
+export default function TransitNearby({ context, assets, origin, at, onChoose, onFocus, data, hazards, onStart }: {
     context: PilotContext; assets: WalkingAsset[]; origin: [number, number]; at: string;
+    data: WalkingData|null; hazards: HazardReport[]; onStart:(asset:WalkingAsset)=>void;
     onChoose: (asset: WalkingAsset) => void; onFocus: (point: [number, number]) => void;
 }) {
     const [mode, setMode] = useState('');
     const [search, setSearch] = useState('');
     const [selectedId, setSelectedId] = useState('');
+    const [linkMessage,setLinkMessage]=useState('');
     const [limit, setLimit] = useState(6);
     const { transit } = context;
     const stopTypes = [...new Set(transit.stops.map(stop => stop.agency))];
@@ -31,13 +38,15 @@ export default function TransitNearby({ context, assets, origin, at, onChoose, o
     const selected = candidates.find(stop => stop.id === selectedId);
     const destinationId = selected ? transitDestinationId(selected) : null;
     const destination = destinationId ? assets.find(asset => asset.id === destinationId) : null;
+    const exits=destination ? assets.filter(asset=>asset.kind==='entrance' && asset.parent_id===destination.id && asset.edge_id!==null && asset.properties.connection_model==='mapped_entrance') : [];
+    const unavailable=unavailableAssetIds(hazards,false);
     const scheduled = selected ? scheduledService(transit, selected, at) : null;
     const agencyName = (agency: string) => TRANSIT_LABELS[agency] ?? agency;
     const shuttleSource = context.sources.find(source => source.id === 'um-shuttle');
     const feedSource = selected ? context.sources.find(source =>
         (selected.agency === 'um-shuttle' && source.id === 'um-shuttle') || source.name.endsWith(`· ${selected.agency}`)) : null;
     return <details className="tg-details">
-        <summary><span className="inline-flex items-center gap-2"><BusFront size={18} aria-hidden /> Walk to transit</span></summary>
+        <summary><span className="inline-flex items-center gap-2"><BusFront size={18} aria-hidden /> Transit · first & last mile</span></summary>
         <div className="tg-stack mt-3 text-sm">
             {context.area_id === 'um-campus' && shuttleSource && <a href={shuttleSource.url} target="_blank" rel="noreferrer"
                 className="inline-flex min-h-11 items-center font-bold underline">UM campus shuttle information</a>}
@@ -76,6 +85,30 @@ export default function TransitNearby({ context, assets, origin, at, onChoose, o
                                 ? 'No departures scheduled in the next six hours from the selected time.'
                                 : 'No timetable for the selected day in this snapshot.'}</p>}
                             {stop.approach && <p className="text-xs">The walk ends at the nearby mapped footpath. Check the final connection and boarding point on site.</p>}
+                            {!!exits.length && data && <section className="space-y-2">
+                                <h3 className="font-bold">Choose a mapped station exit</h3>
+                                <p className="text-xs">Begin at the actual mapped access point, rather than the station pin. Check its current conditions on site.</p>
+                                {exits.map(exit=>{
+                                    const {values,evidence}=assetFacts(exit,data,at), terms=accessTerms(values,at);
+                                    const blocked=unavailable.has(exit.id)||values.available===false||values.path_connection===false||terms.open===false||['private','permission'].includes(terms.access);
+                                    return <div key={exit.id} className="tg-reliability-item space-y-1">
+                                        <strong>{exit.name}</strong>
+                                        <p className="text-xs">{values.osm_level!==undefined||values.level!==undefined?'Level '+(values.osm_level??values.level)+' · ':''}
+                                            Step-free: {values.step_free===true?'recorded yes':values.step_free===false?'recorded no':'unknown'} · {stateNames[conditionState(evidence.step_free,values.step_free)]}</p>
+                                        <p className="text-xs">Lift: {values.lift_available===true?'recorded working':values.lift_available===false?'recorded unavailable':'not recorded'} · Access hours: {terms.open===null?'unknown':terms.open?'recorded open':'recorded closed'}</p>
+                                        {typeof exit.properties.station_plan==='string'&&<a href={exit.properties.station_plan} className="inline-flex min-h-11 items-center font-bold underline" target="_blank" rel="noreferrer">View station plan</a>}
+                                        <button type="button" className="tg-btn" disabled={blocked} onClick={()=>onStart(exit)}>{blocked?'Exit unavailable':'Start from this exit'}</button>
+                                        <button type="button" className="tg-text-action" onClick={async()=>{
+                                            const link=new URL(sitePath('/resident/'),window.location.origin);
+                                            link.search=new URLSearchParams({area:context.area_id,startAsset:exit.id}).toString();
+                                            try{await navigator.clipboard.writeText(link.toString());setLinkMessage('Public exit link copied. It contains only the mapped exit.');}
+                                            catch{setLinkMessage('Could not copy the exit link on this device.');}
+                                        }}>Copy public exit link</button>
+                                    </div>;
+                                })}
+                                {linkMessage&&<p role="status" className="text-xs">{linkMessage}</p>}
+                            </section>}
+                            {!exits.length && destination && <p className="text-xs">No individual connected exits are recorded for this stop. Plan to its mapped approach; the final access point needs checking.</p>}
                             {!destination && <p className="text-xs">A walking access point has yet to be matched.</p>}
                             <div className="grid gap-2 sm:grid-cols-2">
                                 <button type="button" className="tg-btn" onClick={() => onFocus([stop.lat, stop.lng])}><MapPin size={16} aria-hidden /> Show on map</button>

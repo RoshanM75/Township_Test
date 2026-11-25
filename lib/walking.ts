@@ -1,6 +1,7 @@
 import type { Mode, Profile, RouteResult } from './routing.ts';
 import type { RouteShade } from './route-shade.ts';
 import type { PilotId } from './pilots.ts';
+import type { RouteBarrier } from './route-conditions.ts';
 
 export type VerificationTarget = 'path' | 'crossing' | 'entrance' | 'facility';
 export type VerificationState = 'verified' | 'reported' | 'unverified' | 'stale';
@@ -61,7 +62,7 @@ export interface WalkingData {
 }
 
 export function placeSearchText(asset:WalkingAsset){
-    return [asset.name,asset.category,...['osm_name','name_ms','name_en','station_ref','official_name','official_address'].map(key=>asset.properties[key])].filter(value=>typeof value==='string').join(' ').toLowerCase();
+    return [asset.name,asset.category,...['osm_name','name_ms','name_en','station_ref','official_name','official_address','osm_amenity','osm_shop'].map(key=>asset.properties[key])].filter(value=>typeof value==='string').join(' ').replaceAll('_',' ').toLowerCase();
 }
 
 export const COMFORT_PREFERENCES = ['shade', 'shelter', 'lighting', 'controlled_crossings', 'seating'] as const;
@@ -99,7 +100,7 @@ export const DEFAULT_NEEDS: WalkingNeeds = {
 };
 
 export interface JourneyStep {
-    kind: 'path' | 'rest' | 'connection' | 'turn';
+    kind: 'path' | 'rest' | 'connection' | 'turn' | 'errand';
     name: string;
     edge_id?: number;
     asset_id?: string;
@@ -114,6 +115,10 @@ export interface JourneyRoute extends RouteResult {
     steps?: JourneyStep[];
     return_walk?: boolean;
     community_id?: string;
+    start_asset_id?: string;
+    errand_returns?: boolean;
+    errand_stops?: Array<{ destination: WalkingAsset; entrance: WalkingAsset; dwell_min: number; arrival_at: string; leave_at: string; hours_state?:'open'|'unknown' }>;
+    ending_without_rest_min?: number;
     entrance: WalkingAsset;
     destination: WalkingAsset;
     rest_stops: WalkingAsset[];
@@ -145,12 +150,16 @@ export interface JourneyPlan {
     recommended: Mode | null;
     reasons: string[];
     issue?: RouteIssue;
+    barriers?: RouteBarrier[];
+    compared_itineraries?: Array<{ places: string[]; total_min: number; suitability: JourneyRoute['suitability'] }>;
 }
 
 export interface PlanningInput {
     origin: [number, number];
     destination: WalkingAsset;
     entrance_id?: string;
+    start_asset_id?: string;
+    initial_without_rest_min?: number;
     profile: Profile;
     needs: WalkingNeeds;
     departure_at: string;

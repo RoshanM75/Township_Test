@@ -8,6 +8,8 @@ import { useRouter,useSearchParams } from 'next/navigation';
 import type { MouseEvent } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
+import MaintenanceImpact from '@/components/operator/MaintenanceImpact';
+import { CONDITION_LABELS } from '@/lib/route-conditions';
 import PreviewNotice from '@/components/walking/PreviewNotice';
 import { IS_PAGES_PREVIEW } from '@/lib/site';
 import {
@@ -37,7 +39,7 @@ const POLL_MS = 30_000;
 type Kind = 'shade' | 'light' | 'ramp' | 'crossing';
 type Filter = 'all' | Kind;
 type SortBy = 'priority' | 'recent';
-type Section = 'cases' | 'activity' | 'targets';
+type Section = 'cases' | 'activity' | 'targets' | 'impact';
 type Notice = { tone: 'ok' | 'warn' | 'error'; text: string };
 
 const KIND_META: Record<Kind, { label: string; Icon: LucideIcon; tone: string }> = {
@@ -330,13 +332,14 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                     : 'bg-white border-emerald-700 text-emerald-800 hover:bg-emerald-50'
                     }`}
             >
-                {busy ? 'Saving…' : confirming ? 'Click to confirm' : 'Mark fixed'}
+                {busy ? 'Saving…' : confirming ? 'Click to confirm' : defectById.get(id)?.kind==='check_requested'?'Resolve request':'Mark fixed'}
             </button>
         );
     }
 
     const shownCost = visibleItems.reduce((acc, item) => acc + (defectById.get(item.id)?.estimated_cost_rm ?? 0), 0);
     const selectedTarget = selectedDefect ? reportTarget(selectedDefect) : null;
+
 
     /* ---------------- Render ---------------- */
 
@@ -381,25 +384,26 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                     if (!key) { setTeamFilter(''); setOverdueOnly(false); setCaseStatus('all'); }
                 }} />}
                 <nav aria-label="Operator workspace" className="flex flex-wrap gap-2">
-                    {([['cases', 'Maintenance queue'], ['activity', 'Activity and exports'], ['targets', 'Access and responsibility']] as const)
+                    {([['cases', 'Maintenance queue'], ['activity', 'Activity and exports'], ['targets', 'Access and responsibility'], ['impact','Maintenance impact']] as const)
                         .map(([value, label]) => <button type="button" key={value} aria-pressed={section === value} onClick={() => {
                             setSection(value);
                             if (value === 'targets') setFocusTarget(undefined);
                         }} className={`min-h-11 rounded-lg border border-slate-300 px-3 text-sm font-bold ${section === value
                             ? 'bg-slate-900 text-white' : 'bg-white text-slate-800'}`}>{label}</button>)}
                 </nav>
-                {section !== 'cases' && !operatorKey && <p className="rounded-xl border border-slate-300 bg-white p-4">
+                {section !== 'cases' && section !== 'impact' && !operatorKey && <p className="rounded-xl border border-slate-300 bg-white p-4">
                     {IS_PAGES_PREVIEW ? 'Live operator tools are available on the server app.' : 'Enter the reviewer key to open this workspace.'}
                 </p>}
                 {section === 'activity' && operatorKey && <ActivityPanel area={area} reviewerKey={operatorKey} onOpenCase={id => {
                     setSection('cases'); setFilter('all'); setTeamFilter(''); setOverdueOnly(false); setCaseStatus('all'); setSelectedId(id);
                 }} />}
                 {section === 'targets' && operatorKey && <TargetsPanel area={area} reviewerKey={operatorKey} initial={focusTarget} />}
+                {section === 'impact' && <MaintenanceImpact key={area} area={area} revision={refreshVersion}/> }
                 {section === 'cases' && <>
                 <PilotSources area={area}/>
                 {/* KPI strip */}
                 <section aria-label="Key figures" className="grid grid-cols-1 min-[480px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
-                    <Kpi Icon={ClipboardList} label="Open defects" value={metrics.open.toLocaleString()} sub="Waiting for a fix" />
+                    <Kpi Icon={ClipboardList} label="Open cases" value={metrics.open.toLocaleString()} sub="Waiting for a check or fix" />
                     <Kpi Icon={AlertTriangle} label="Critical blockers" value={metrics.blockers.toLocaleString()} sub="Stop some people walking" />
                     <Kpi Icon={Wallet} label="Backlog cost" value={`RM ${metrics.cost.toLocaleString()}`} sub="Estimated, all open defects" />
                     <Kpi Icon={Footprints} label="Mapped places" value={dataCounts.places.toLocaleString()} sub="Recorded destinations & stops" />
@@ -457,6 +461,7 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                                     </dl>
                                     <p className="text-sm font-bold">{reportStatus(selectedDefect)}
                                         {selectedDefect.responsible_team && ` · ${selectedDefect.responsible_team}`}</p>
+                                    {selectedDefect.requested_field && <p className="text-sm font-bold">Requested check: {CONDITION_LABELS[selectedDefect.requested_field]??selectedDefect.requested_field}</p>}
                                     {selectedDefect.shade_change && <p className="text-sm">{shadeChangeLabel[selectedDefect.shade_change]}
                                         {selectedDefect.observed_at && ` · Observed ${malaysiaTimeLabel(selectedDefect.observed_at, 'en', true)} MYT`}</p>}
                                     {selectedDefect.map_updated_at && <p className="text-sm">Map updated {malaysiaTimeLabel(selectedDefect.map_updated_at, 'en', true)} MYT</p>}
@@ -468,6 +473,12 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                                     }} />}
                                     {operatorKey && selectedTarget && <button type="button" className="min-h-11 text-sm font-bold text-[#7F1D22] underline"
                                         onClick={() => { setFocusTarget(selectedTarget); setSection('targets'); }}>View mapped target and responsibility</button>}
+                                    {operatorKey && selectedTarget && <div className="rounded-lg bg-slate-50 p-3 space-y-2 border border-slate-200">
+                                        <p className="text-sm">{selectedDefect.kind==='check_requested'?'This is an information request, not a confirmed defect. Record the observed condition to update the walking map.':'Record a fresh field observation after a repair. Closing a work order does not replace any separate verified restriction.'}</p>
+                                        <button type="button" className="block min-h-11 text-sm font-bold underline"
+                                            onClick={()=>{setFocusTarget(selectedTarget);setSection('targets');}}>Open target&rsquo;s field-check record</button>
+                                        <button type="button" className="block min-h-11 text-sm font-bold underline" onClick={()=>setSection('impact')}>Compare potential repair impact</button>
+                                    </div>}
                                     {related.length > 0 && <details className="text-sm">
                                         <summary className="min-h-8 cursor-pointer font-bold">Related open reports · {related.length}</summary>
                                         <ul>{related.map(report => <li key={report.id}>
@@ -595,7 +606,7 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                                             <td colSpan={7} className="py-12 text-center">
                                                 <Check className="w-8 h-8 mx-auto text-emerald-600" aria-hidden />
                                                 <p className="mt-2 font-bold text-slate-800">
-                                                    {IS_PAGES_PREVIEW ? 'Shared maintenance reports are unavailable in this preview.' : defects.length === 0 ? 'All clear. There are no open defects.' : 'No open defects of this type.'}
+                                                    {IS_PAGES_PREVIEW ? 'Shared maintenance reports are unavailable in this preview.' : defects.length === 0 ? 'All clear. There are no open cases.' : 'No open cases of this type.'}
                                                 </p>
                                             </td>
                                         </tr>

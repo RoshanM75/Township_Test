@@ -168,6 +168,7 @@ ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS shade_change TEXT CHECK (sha
 ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS map_updated_at TIMESTAMPTZ;
 ALTER TABLE hazard_reports ALTER COLUMN edge_id DROP NOT NULL;
 ALTER TABLE defect_reports ALTER COLUMN edge_id DROP NOT NULL;
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS requested_field TEXT;
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='hazard_reports_has_target' AND conrelid='hazard_reports'::regclass) THEN
@@ -178,10 +179,10 @@ END $$;
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'hazard_reports_kind_check'
-        AND conrelid = 'hazard_reports'::regclass AND strpos(pg_get_constraintdef(oid),'shade_correction') > 0) THEN
+        AND conrelid = 'hazard_reports'::regclass AND strpos(pg_get_constraintdef(oid),'check_requested') > 0) THEN
         ALTER TABLE hazard_reports DROP CONSTRAINT IF EXISTS hazard_reports_kind_check;
         ALTER TABLE hazard_reports ADD CONSTRAINT hazard_reports_kind_check
-            CHECK (kind IN ('blocked', 'no_ramp', 'light_out', 'no_shade', 'broken_surface', 'lift_out', 'details_outdated', 'shade_correction'));
+            CHECK (kind IN ('blocked', 'no_ramp', 'light_out', 'no_shade', 'broken_surface', 'lift_out', 'details_outdated', 'shade_correction', 'check_requested'));
     END IF;
 END $$;
 
@@ -203,6 +204,18 @@ CREATE TABLE IF NOT EXISTS community_routes (
     review_note TEXT,
     UNIQUE (area_id, submission_id)
 );
+ALTER TABLE community_routes ADD COLUMN IF NOT EXISTS guide_kind TEXT NOT NULL DEFAULT 'general';
+CREATE TABLE IF NOT EXISTS community_route_reviews (
+    id BIGSERIAL PRIMARY KEY,
+    route_id UUID NOT NULL REFERENCES community_routes(id) ON DELETE CASCADE,
+    action TEXT NOT NULL CHECK (action IN ('publish','verify','decline')),
+    reviewer TEXT NOT NULL,
+    note TEXT NOT NULL,
+    checked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    opening_hours TEXT,
+    valid_until TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_community_route_reviews_route ON community_route_reviews(route_id,checked_at DESC,id DESC);
 CREATE INDEX IF NOT EXISTS idx_community_routes_area_status ON community_routes(area_id,status,created_at DESC);
 
 ALTER TABLE community_routes ADD COLUMN IF NOT EXISTS opening_hours TEXT;

@@ -1,5 +1,6 @@
 import { isWalkingProfile, type Profile, type PathEdge } from './routing.ts';
 import type { JourneyRoute, WalkingNeeds, WalkingData, VerificationRecord, WalkingAsset } from './walking.ts';
+import type { RouteMonitor } from './usual-routes.ts';
 import type { TrackState } from './walk-tracking.ts';
 import { projectPoint } from './walking-geometry.ts';
 import { isPilot,type PilotId } from './pilots.ts';
@@ -13,6 +14,7 @@ export interface ConditionUpdate { id: string; kind: 'blocked' | 'light_out' | '
 export type PackCheck = Pick<VerificationRecord, 'id' | 'created_at' | 'target_type' | 'target_id' | 'status' | 'observed_at' | 'valid_until' | 'attributes'>;
 export interface WalkPack { version: 1; id: string; saved_at: string; data_at: string; title: string; route: JourneyRoute; profile: Profile;
     area_id?:PilotId;dataset_id?:string;
+    routine?: RouteMonitor;
     needs: WalkingNeeds; origin: [number, number]; network_snapshot_at?: string | null; facilities: WalkingAsset[]; edges: PathEdge[]; checks: PackCheck[] }
 // The walker may explicitly confirm that they reached the selected place.
 // No arrival is inferred from a planned route or from finishing its timer.
@@ -41,6 +43,10 @@ function packValid(p: WalkPack) {
         && Array.isArray(p.route.coordinates) && p.route.coordinates.length >= 2 && p.route.coordinates.every(coordinate)
         && ['length_m','total_min','rest_min'].every(k => Number.isFinite(p.route[k as keyof JourneyRoute]))
         && p.route.entrance && typeof p.route.entrance.name === 'string' && p.route.destination && typeof p.route.destination.name === 'string'
+        && (p.routine===undefined || typeof p.routine.label==='string'&&p.routine.label.trim().length>0&&p.routine.label.length<=80&&typeof p.routine.enabled==='boolean')
+        && (p.route.errand_stops===undefined || Array.isArray(p.route.errand_stops)&&p.route.errand_stops.length>=2&&p.route.errand_stops.length<=3
+            &&p.route.errand_stops.every(stop=>stop&&typeof stop.destination?.id==='string'&&typeof stop.entrance?.id==='string'&&instant(stop.arrival_at)&&instant(stop.leave_at)
+                &&Number.isFinite(stop.dwell_min)&&stop.dwell_min>=0&&stop.dwell_min<=60))
         && Array.isArray(p.edges) && p.edges.every(e => Number.isFinite(e.id) && Array.isArray(e.geometry))
         && Array.isArray(p.checks) && p.checks.every(c => c && c.attributes && typeof c.attributes === 'object' && instant(c.observed_at))
         && Array.isArray(p.facilities) && p.facilities.every(a => a && coordinate([a.lat,a.lng]) && typeof a.name === 'string');
@@ -69,8 +75,8 @@ export function createWalkPack(route: JourneyRoute, profile: Profile, needs: Wal
     const ids = new Set(route.edge_ids);
     const facilities = data.assets.filter(a => ['rest','shelter','water','toilet'].includes(a.kind) && (route.rest_stops.some(s => s.id === a.id)
         || projectPoint(route.coordinates.map(([lat,lng]) => [lng,lat]), [a.lng,a.lat]).distance <= 100));
-    const assets = new Set([route.entrance.id, ...facilities.map(a => a.id)]);
-    return { version: 1, id: crypto.randomUUID(), saved_at: now, data_at: data.as_of,area_id:data.area_id??'elmina',dataset_id:data.dataset_id, title: route.return_walk ? `Return walk · ${Math.ceil(route.total_min)} min` : route.destination.name,
+    const assets = new Set([route.destination.id, route.entrance.id, ...(route.start_asset_id ? [route.start_asset_id] : []), ...facilities.map(a => a.id), ...(route.errand_stops ?? []).flatMap(stop=>[stop.entrance.id,stop.destination.id])]);
+    return { version: 1, id: crypto.randomUUID(), saved_at: now, data_at: data.as_of,area_id:data.area_id??'elmina',dataset_id:data.dataset_id, title: route.errand_stops?.length ? `Errands · ${route.errand_stops.length} stops` : route.return_walk ? `Return walk · ${Math.ceil(route.total_min)} min` : route.destination.name,
         route, profile, needs, origin, network_snapshot_at: networkSnapshot, facilities, edges: edges.filter(e => ids.has(e.id)),
         checks: data.verifications.filter(v => (v.target_type === 'path' || v.target_type === 'crossing') ? ids.has(Number(v.target_id)) : assets.has(v.target_id))
             .map(({ id,created_at,target_type,target_id,status,observed_at,valid_until,attributes }) => ({ id,created_at,target_type,target_id,status,observed_at,valid_until,attributes })) };

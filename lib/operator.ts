@@ -132,7 +132,9 @@ export function operatorActivity(reports: MaintenanceDefect[], area: PilotId, da
     const today = malaysiaDate(asOf);
     const opened = reports.filter(report => within(report.created_at, from, asOf));
     const checked = reports.filter(report => !report.dismissed_at && within(report.checked_at, from, asOf));
-    const fixed = reports.filter(report => !report.dismissed_at && within(report.fixed_at, from, asOf));
+    const resolved = reports.filter(report => !report.dismissed_at && within(report.fixed_at, from, asOf));
+    const fixed = resolved.filter(report=>report.kind!=='check_requested');
+    const resolvedFieldChecks=resolved.filter(report=>report.kind==='check_requested').length;
     const open = reports.filter(report => report.status !== 'fixed');
     const teams = new Map<string | null, { team: string | null; open: number; checked: number; overdue: number }>();
     for (const report of open) {
@@ -170,7 +172,7 @@ export function operatorActivity(reports: MaintenanceDefect[], area: PilotId, da
         return { start, end, reported: opened.filter(report => inside(report.created_at)).length,
             fixed: fixed.filter(report => inside(report.fixed_at)).length };
     });
-    return { area_id: area, days, from, as_of: asOf, reported: opened.length, checked: checked.length, fixed: fixed.length,
+    return { area_id: area, days, from, as_of: asOf, reported: opened.length, checked: checked.length, fixed: fixed.length, resolved_field_checks:resolvedFieldChecks,
         dismissed: reports.filter(report => within(report.dismissed_at, from, asOf)).length,
         median_check_hours: medianHours(checked, 'checked_at'), median_fix_hours: medianHours(fixed, 'fixed_at'),
         open: open.length, unassigned: teams.get(null)?.open ?? 0, overdue: open.filter(report => isOverdue(report, today)).length,
