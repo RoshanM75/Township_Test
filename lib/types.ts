@@ -27,6 +27,7 @@ export interface MaintenanceDefect extends ReportMarker {
     observed_at?: string | null;
     shade_change?: ShadeChange | null;
     map_updated_at?: string | null;
+    requested_field?:string|null;
     fixed_at?: string | null;
     dismissed_at?: string | null;
     responsible_team?: string | null;

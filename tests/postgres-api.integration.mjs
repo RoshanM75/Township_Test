@@ -305,7 +305,7 @@ test('Next.js APIs with real PostgreSQL/PostGIS', { timeout: 60000 }, async (t) 
             const base = '/api/community-routes?area=pasar-seni';
             const context = (await request('/api/pilot-context?area=pasar-seni')).body;
             const draft = { submission_id: randomUUID(), dataset_id: context.dataset_id, title: 'Test local shortcut',
-                notes: 'Use the public path by the clinic.', public_ends: true, points: [[3.1425, 101.694], [3.1425, 101.696]] };
+                notes: 'Use the public path by the clinic.', guide_kind:'shortcut', public_ends: true, points: [[3.1425, 101.694], [3.1425, 101.696]] };
             const upload = body => request(base, { method: 'POST', body: JSON.stringify(body) });
             assert.equal((await upload({ ...draft, public_ends: false })).status, 400);
             assert.equal((await upload({ ...draft, dataset_id: 'different' })).status, 409);
@@ -313,6 +313,7 @@ test('Next.js APIs with real PostgreSQL/PostGIS', { timeout: 60000 }, async (t) 
             assert.equal(submitted.status, 201);
             const { route } = submitted.body;
             assert.equal(route.status, 'submitted');
+            assert.equal(route.guide_kind,'shortcut');
             assert.ok(route.path.edge_ids.length > 0);
             assert.equal((await upload(draft)).body.route.id, route.id);
             assert.deepEqual((await request(base)).body.routes, []);
@@ -330,6 +331,11 @@ test('Next.js APIs with real PostgreSQL/PostGIS', { timeout: 60000 }, async (t) 
             const checked = await review(endpoint(route.id), verify);
             assert.equal(checked.body.route.status, 'verified');
             assert.ok(Date.parse(checked.body.route.valid_until) > Date.now());
+            assert.equal(checked.body.route.reviews?.length,2);
+            const published=(await request(base)).body.routes.find(item=>item.id===route.id);
+            assert.equal(published.reviews[0].action,'verify');
+            assert.equal(published.reviews[1].action,'publish');
+            assert.equal((await review(endpoint(route.id),{...verify,note:'Second field review'})).body.route.reviews.length,3);
             const unmapped = await upload({ ...draft, submission_id: randomUUID(), points: [[3.1425, 101.694], [3.143, 101.694]] });
             assert.equal(unmapped.body.route.path, null);
             assert.equal((await review(endpoint(unmapped.body.route.id), { ...evidence, action: 'publish' })).status, 422);
@@ -434,6 +440,25 @@ test('Next.js APIs with real PostgreSQL/PostGIS', { timeout: 60000 }, async (t) 
             assert.equal((await fix(id)).status, 200);
             const finished = (await request('/api/reports?status=all')).body.reports.find(report => report.id === id);
             assert.ok(finished.fixed_at && finished.map_updated_at);
+        });
+        await t.test('specific field-check requests require a new current observation and do not represent physical defects', async () => {
+            assert.equal((await post({lat:position.lat,lng:position.lng,kind:'check_requested'})).status,400);
+            const created=await post({...position,kind:'check_requested',requested_field:'clear_width_m',description:'Please check the clear walking width.'});
+            assert.equal(created.status,201);
+            const {id}=created.body.report;
+            assert.equal(created.body.report.requested_field,'clear_width_m');
+            assert.equal(created.body.report.estimated_cost_rm,0);
+            assert.equal(created.body.hazard.kind,'check_requested');
+            assert.equal((await check(id)).status,409);
+            const observation={target_type:'path',target_id:String(position.edge_id),status:'verified',method:'site_visit',reviewer:'Field check team',
+                observed_at:new Date().toISOString(),valid_until:new Date(Date.now()+7*86400000).toISOString(),attributes:{clear_width_m:1.4}};
+            assert.equal((await review('/api/verifications',observation)).status,201);
+            const verified=await check(id);
+            assert.equal(verified.status,200);
+            assert.ok(verified.body.report.checked_at&&verified.body.report.map_updated_at);
+            assert.equal((await fix(id)).status,200);
+            assert.ok((await request('/api/reports?status=all')).body.reports.find(r=>r.id===id).fixed_at);
+            assert.ok(!(await request('/api/hazards')).body.hazards.some(h=>h.id===created.body.hazard.id));
         });
         await t.test('database outages return 503 without exposing connection details', async () => {
             await fixture.end(); fixture = undefined;

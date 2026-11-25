@@ -31,6 +31,8 @@ const ASSET_FIELDS: ObservationField[] = [
     { key: 'armrests', label: 'Seat has armrests', kind: 'boolean' },
     { key: 'accessible_toilet', label: 'Toilet access checked', kind: 'boolean' },
     { key: 'water_available', label: 'Drinking water available', kind: 'boolean' },
+    { key: 'public_access', label: 'Access terms', kind: 'choice', options: ['public','customers','destination','permission','private'] },
+    { key: 'fee', label: 'A fee or purchase is required', kind: 'boolean' },
     { key: 'opening_hours', label: 'Hours: 24/7, or Mo-Fr 09:00-17:00', kind: 'text' },
     { key: 'connection_length_m', label: 'Measured connection length (metres)', kind: 'number', min: 0, max: 100 },
 ];

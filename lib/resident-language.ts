@@ -1,6 +1,11 @@
 export type ResidentLanguage = 'en' | 'ms';
 
 const malay = {
+    'Request a field check': 'Minta semakan di lokasi', 'Journey readiness': 'Kesediaan perjalanan',
+    'Needs review': 'Perlu semakan', 'Recorded checks current': 'Semakan masih sah',
+    'My usual routes': 'Laluan kebiasaan saya', 'Plan errands': 'Rancang urusan',
+    'Walking together': 'Berjalan bersama', 'Save usual route': 'Simpan laluan kebiasaan',
+    'Errand itinerary': 'Jadual urusan',
     'Walking area': 'Kawasan berjalan kaki', 'Map': 'Peta', 'Saved': 'Disimpan', 'Reports': 'Laporan', 'Walk': 'Berjalan',
     'Walking sections': 'Bahagian berjalan kaki', 'Walk planning': 'Perancangan perjalanan',
     'From': 'Dari', 'To': 'Ke', 'Find a place': 'Cari tempat', 'Where are you walking to?': 'Anda mahu berjalan ke mana?',
@@ -53,7 +58,7 @@ const malay = {
     'Community routes': 'Laluan komuniti', 'Submit for review': 'Hantar untuk semakan',
     'Save draft on this device': 'Simpan draf pada peranti ini', 'Route name': 'Nama laluan', 'Local notes': 'Nota tempatan',
     'Report a problem': 'Lapor masalah', 'Report issue': 'Lapor masalah', 'Report history': 'Sejarah laporan', 'My reports': 'Laporan saya', 'Area reports': 'Laporan kawasan',
-    'No reports yet.': 'Belum ada laporan.', 'Reported': 'Dilaporkan', 'Checked': 'Disemak', 'Fixed': 'Dibaiki', 'Dismissed': 'Ditutup',
+    'No reports yet.': 'Belum ada laporan.', 'Resolved': 'Diselesaikan', 'Reported': 'Dilaporkan', 'Checked': 'Disemak', 'Fixed': 'Dibaiki', 'Dismissed': 'Ditutup',
     'Saved on this device': 'Disimpan pada peranti ini', 'Blocked path': 'Laluan terhalang', 'Lift out': 'Lif rosak',
     'Broken pavement': 'Laluan rosak', 'Broken light': 'Lampu rosak', 'Missing shade': 'Tiada teduhan',
     'Missing kerb ramp': 'Tiada tanjakan bebendul', 'Incorrect place details': 'Butiran tempat tidak tepat',

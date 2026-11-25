@@ -8,6 +8,7 @@ import { shadeChangeLabel, type ShadeChange } from '@/lib/shade-corrections';
 import type { MaintenanceDefect } from '@/lib/types';
 
 export const issueLabel: Record<HazardKind, ResidentLabel> = {
+    check_requested: 'Request a field check',
     blocked: 'Blocked path', lift_out: 'Lift out', broken_surface: 'Broken pavement', light_out: 'Broken light',
     shade_correction: 'Shade map correction', no_ramp: 'Missing kerb ramp', no_shade: 'Missing shade', details_outdated: 'Incorrect place details',
 };
@@ -28,9 +29,9 @@ function ReportTimeline({ report, language }: { report: MaintenanceDefect; langu
     const stages: { title: ResidentLabel; date?: string | null; done: boolean }[] = [
         { title: 'Reported', date: report.created_at, done: true },
         { title: 'Checked', date: report.checked_at, done: Boolean(report.checked_at) },
-        ...(report.kind === 'shade_correction' && !report.dismissed_at ? [{ title: 'Map updated' as const, date: report.map_updated_at, done: Boolean(report.map_updated_at) }] : []),
+        ...((report.kind === 'shade_correction'||report.kind==='check_requested'||report.map_updated_at) && !report.dismissed_at ? [{ title: 'Map updated' as const, date: report.map_updated_at, done: Boolean(report.map_updated_at) }] : []),
         report.dismissed_at ? { title: 'Dismissed', date: report.dismissed_at, done: true }
-            : { title: 'Fixed', date: report.fixed_at, done: report.status === 'fixed' },
+            : { title: report.kind==='check_requested'?'Resolved':'Fixed', date: report.fixed_at, done: report.status === 'fixed' },
     ];
     return <ol className="tg-report-timeline">
         {stages.map(({ title, date, done }) => <li key={title} data-done={done}>

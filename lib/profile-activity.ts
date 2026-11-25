@@ -77,7 +77,7 @@ export function isConfirmedVisit(value: unknown): value is ConfirmedVisit {
 // Return walks and community shortcut endpoints are not automatically visits.
 export function destinationForVisit(pack: WalkPack): ConfirmedVisit | null {
     const { route } = pack;
-    if (route.return_walk || route.community_id || !route.destination || route.destination.kind === 'entrance') return null;
+    if (route.errand_stops?.length || route.return_walk || route.community_id || !route.destination || route.destination.kind === 'entrance') return null;
     const destination = route.destination;
     const visit = { place_id: destination.external_id || destination.id, name: residentPlaceName(destination).trim() };
     return isConfirmedVisit(visit) ? visit : null;

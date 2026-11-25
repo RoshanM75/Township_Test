@@ -44,6 +44,15 @@ export function mappedWayfinding(bundle, raw) {
         const mobility = yesNo(tags.wheelchair);
         const values = compact({
             clear_width_m: width(tags),
+            public_access: ['yes','public','permissive'].includes(tags.access) ? 'public' : tags.access==='customers' ? 'customers' : tags.access==='destination' ? 'destination'
+                : tags.access==='permit' ? 'permission' : ['no','private'].includes(tags.access) ? 'private' : undefined,
+            fee: yesNo(tags.fee),
+            osm_amenity: tags.amenity,
+            osm_shop: tags.shop,
+            has_seat: yesNo(tags.seating),
+            opening_hours: tags.opening_hours,
+            osm_level: tags.level,
+
             step_free: asset.kind === 'entrance' && mobility === false ? false : undefined,
             accessible_toilet: asset.kind === 'toilet' ? yesNo(tags['toilets:wheelchair']) ?? mobility : undefined,
             water_available: asset.kind === 'water' ? yesNo(tags.drinking_water) ?? true : undefined,

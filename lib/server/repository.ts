@@ -8,8 +8,10 @@ import { pilotContext } from './pilots.ts';
 import { assignmentInput, recordAssignment, responsibilityAt } from './responsibilities.ts';
 import type { MaintenanceDefect } from '../types.ts';
 import { reportTarget } from '../operator.ts';
+import { observationFields } from '../verification-fields.ts';
 
 const PROBLEMS: Record<HazardKind, { category: string; severity: 'blocker' | 'comfort'; label: string }> = {
+    check_requested: { category: 'Condition verification', severity: 'comfort', label: 'Field check requested' },
     blocked: { category: 'Access Barrier', severity: 'blocker', label: 'Path is blocked' },
     no_ramp: { category: 'Universal Design', severity: 'blocker', label: 'No ramp at the kerb' },
     light_out: { category: 'Safety Electrical', severity: 'comfort', label: 'Streetlight is not working' },
@@ -46,7 +48,7 @@ export async function readHazards(area: PilotId = 'elmina') {
 
 const REPORT_FIELDS = `id::text, hazard_report_id::text, edge_id::float8 AS edge_id,
     lat, lng, kind, description, category, severity, location_name, estimated_cost_rm,
-    reported_by_proxy, status, created_at, asset_id::text, checked_at, fixed_at, dismissed_at, responsible_team, review_note, observed_at, shade_change, map_updated_at`;
+    reported_by_proxy, status, created_at, asset_id::text, checked_at, fixed_at, dismissed_at, responsible_team, review_note, observed_at, shade_change, map_updated_at, requested_field`;
 
 const OPERATOR_REPORT_FIELDS = `${REPORT_FIELDS}, due_on::text, work_order_ref, assignment_version`;
 
@@ -81,6 +83,9 @@ export async function createReport(report: NewReport) {
         const edge = rows[0];
         if (!edge && !asset) throw new RequestError(report.kind === 'shade_correction'
             ? 'Choose a point along the affected path segment.' : 'Choose a location within 150 metres of a mapped footpath.', 422);
+        const verificationType=asset ? asset.kind==='entrance'?'entrance':'facility' : edge?.is_crossing?'crossing':'path';
+        if(report.requested_field&&!observationFields(verificationType).some(field=>field.key===report.requested_field))
+            throw new RequestError('The requested field does not apply to this mapped target.');
         const problem = PROBLEMS[report.kind];
         const location = asset?.name || edge?.name || `${edge?.is_crossing ? 'Crossing' : 'Walkway'} #${edge?.id}`;
         const description = report.description || `${problem.label} reported on ${location}`;
@@ -92,12 +97,12 @@ export async function createReport(report: NewReport) {
         [edge?.id ?? null, lat, lng, report.kind, area, asset?.id ?? null]);
         const { rows: defects } = await client.query(`INSERT INTO defect_reports
             (hazard_report_id, edge_id, lat, lng, kind, description, category, severity, location_name,
-             estimated_cost_rm, reported_by_proxy, area_id, asset_id, responsible_team, assignment_version, observed_at, shade_change)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+             estimated_cost_rm, reported_by_proxy, area_id, asset_id, responsible_team, assignment_version, observed_at, shade_change, requested_field)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
             RETURNING ${REPORT_FIELDS}`,
         [hazards[0].id, edge?.id ?? null, lat, lng, report.kind, description, problem.category, problem.severity, location,
-            report.kind === 'details_outdated' || report.kind === 'lift_out' || report.kind === 'shade_correction' ? 0 : estimateDefectCost(report.kind, edge?.length_m),
-            report.reported_by_proxy, area, asset?.id ?? null, responsibility?.team ?? null, responsibility ? 1 : 0, report.observed_at ?? null, report.shade_change ?? null]);
+            report.kind === 'check_requested' || report.kind === 'details_outdated' || report.kind === 'lift_out' || report.kind === 'shade_correction' ? 0 : estimateDefectCost(report.kind, edge?.length_m),
+            report.reported_by_proxy, area, asset?.id ?? null, responsibility?.team ?? null, responsibility ? 1 : 0, report.observed_at ?? null, report.shade_change ?? null,report.requested_field??null]);
         if (responsibility) await recordAssignment(client, { ...defects[0], assignment_version: 1 }, 'responsibility');
         await client.query('COMMIT');
         return { hazard: hazards[0], report: defects[0] };
@@ -134,14 +139,31 @@ export async function reviewReport(id: string, area: PilotId, check?: ReturnType
             [target.is_crossing ? 'crossing' : 'path', old.edge_id, old.observed_at,
                 check.shade_result === 'roof_removed' ? '90 days' : '30 days', check.team, `report:${id}`, check.note, JSON.stringify(attributes), area]);
         }
+        // A request asks for evidence, not confirmation of a defect. Resolve
+        // it only with a real, current observation of the specified target.
+        const fieldRequest=check && !check.dismiss && old.kind==='check_requested';
+        if(fieldRequest) {
+            const type=old.asset_id ? (await client.query<{kind:string}>('SELECT kind FROM walking_assets WHERE id=$1 AND area_id=$2',[old.asset_id,area])).rows[0]?.kind==='entrance'?'entrance':'facility'
+                : (await client.query<{is_crossing:boolean}>('SELECT is_crossing FROM path_edges WHERE id=$1 AND area_id=$2',[old.edge_id,area])).rows[0]?.is_crossing?'crossing':'path';
+            const latest=(await client.query<{current:boolean}>(`SELECT status='verified' AND valid_until>NOW() AND created_at>=$4::timestamptz AS current
+                FROM verification_records WHERE area_id=$1 AND target_type=$2 AND target_id=$3 AND observed_at<=NOW()
+                AND ($5::text IS NULL OR attributes ? $5::text)
+                ORDER BY observed_at DESC,created_at DESC,id DESC LIMIT 1`,[area,type,old.asset_id??String(old.edge_id),old.created_at,old.requested_field??null])).rows[0];
+            if(!latest?.current)throw new RequestError('Record a current field observation for the requested condition in the verification workspace before marking this request checked.',409);
+        }
         const assign = Boolean(check && !old.responsible_team);
         const { rows } = check
             ? await client.query<MaintenanceDefect>(`UPDATE defect_reports SET checked_at=NOW(), responsible_team=COALESCE(responsible_team,$2), review_note=$3,
                 status=CASE WHEN $4 THEN 'fixed' ELSE status END, dismissed_at=CASE WHEN $4 THEN NOW() ELSE NULL END,
                 assignment_version=assignment_version + CASE WHEN $5 THEN 1 ELSE 0 END,
                 map_updated_at=CASE WHEN $6 THEN NOW() ELSE map_updated_at END
-                WHERE id=$1 RETURNING ${OPERATOR_REPORT_FIELDS}`, [id, check.team, check.note, check.dismiss, assign, Boolean(shadeReview)])
-            : await client.query<MaintenanceDefect>(`UPDATE defect_reports SET status='fixed', fixed_at=NOW()
+                WHERE id=$1 RETURNING ${OPERATOR_REPORT_FIELDS}`, [id, check.team, check.note, check.dismiss, assign, Boolean(shadeReview||fieldRequest)])
+            : await client.query<MaintenanceDefect>(`UPDATE defect_reports SET status='fixed', fixed_at=NOW(),
+                map_updated_at=CASE WHEN EXISTS (
+                    SELECT 1 FROM verification_records v WHERE v.area_id=defect_reports.area_id AND v.target_id=COALESCE(defect_reports.asset_id,defect_reports.edge_id)
+                    AND v.target_type IN (CASE WHEN defect_reports.asset_id IS NULL THEN 'path' ELSE 'entrance' END,CASE WHEN defect_reports.asset_id IS NULL THEN 'crossing' ELSE 'facility' END)
+                    AND v.status='verified' AND v.valid_until>NOW() AND v.observed_at>=defect_reports.checked_at
+                ) THEN NOW() ELSE map_updated_at END
                 WHERE id=$1 RETURNING ${OPERATOR_REPORT_FIELDS}`, [id]);
         if (assign) await recordAssignment(client, rows[0], 'review');
         await client.query('UPDATE hazard_reports SET status=$2 WHERE id=$1',

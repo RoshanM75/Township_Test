@@ -3,8 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { loadCommunityRoutes, submitCommunityRoute } from '@/lib/api';
-import { communityStatusLabel, matchCommunityPath, MAX_COMMUNITY_POINTS, publicRoutePoints,
+import { communityStatusLabel, matchCommunityPath, MAX_COMMUNITY_POINTS, publicRoutePoints, GUIDE_KINDS, GUIDE_LABELS, type GuideKind,
     type CommunityDraft, type CommunityPath, type CommunityRoute, type RoutePoint } from '@/lib/community-routes';
+import type { WalkingData } from '@/lib/walking';
+import type { HazardReport } from '@/lib/routing';
+import { evidenceFor, isConfirmed } from '@/lib/verification';
+import { stateNames } from './JourneyReadiness';
+import { conditionState, observedEdge } from '@/lib/route-conditions';
 import type { GraphData } from '@/lib/api';
 import type { CompletedWalk } from '@/lib/walk-library';
 import { addTrackFix, emptyTrack } from '@/lib/walk-tracking';
@@ -45,6 +50,8 @@ interface Props {
     dataset: string;
     graph: Pick<GraphData, 'nodes' | 'edges'>;
     walks: CompletedWalk[];
+    walking:WalkingData;
+    hazards:HazardReport[];
     startPoints: StartPoint[];
     routes: CommunityRoute[];
     now: string;
@@ -56,7 +63,7 @@ interface Props {
     language?: ResidentLanguage;
 }
 
-export default function CommunityRoutes({ area, dataset, graph, walks, startPoints, routes, now, onPlan, onShared, initialWalk, initialRouteId, onShare, language = 'en' }: Props) {
+export default function CommunityRoutes({ area, dataset, graph, walks, startPoints, routes, walking, hazards, now, onPlan, onShared, initialWalk, initialRouteId, onShare, language = 'en' }: Props) {
     const [editing, setEditing] = useState(!!initialWalk);
     const [fromWalk, setFromWalk] = useState(initialWalk);
     const [selected, setSelected] = useState<string | null>(initialRouteId ?? null);
@@ -75,6 +82,14 @@ export default function CommunityRoutes({ area, dataset, graph, walks, startPoin
     }, [receipt, area, refresh]);
     const nearby = routes.filter(route => route.dataset_id === dataset && route.path);
     const inspected = nearby.find(route => route.id === selected);
+    const inspectedEdges=graph.edges.filter(edge=>inspected?.path?.edge_ids.includes(edge.id));
+    const guideChecks=inspectedEdges.map(edge=>{
+        const facts=evidenceFor(walking.verifications,edge.is_crossing?'crossing':'path',edge.id,now);
+        const current=observedEdge(edge,walking.verifications,now);
+        return {current,check:isConfirmed(facts,'has_steps')&&(!edge.is_crossing||isConfirmed(facts,'has_kerb_ramp')),
+            roof:conditionState(facts.covered,current.covered)};
+    });
+    const routeHazards=hazards.filter(h=>h.status!=='fixed' && h.kind!=='check_requested' && h.edge_id!==null && inspected?.path?.edge_ids.includes(h.edge_id));
     if (editing) return <CommunityRouteEditor area={area} dataset={dataset} graph={graph} walks={walks} startPoints={startPoints} initialWalk={fromWalk} language={language}
         onExit={() => { setEditing(false); setFromWalk(undefined); }} onSubmitted={(route, submission) => {
             setMine(route); setReceipt(submission); setEditing(false); setFromWalk(undefined); onShared();
@@ -100,12 +115,20 @@ export default function CommunityRoutes({ area, dataset, graph, walks, startPoin
                         <button type="button" className="tg-card w-full" aria-pressed={inspected?.id === route.id}
                             onClick={() => { setShareMessage(''); setSelected(previous => previous === route.id ? null : route.id); }}>
                             <span className="min-w-0 break-words"><strong>{route.title}</strong>
-                                <span className="tg-small block">{route.path?.length_m} m · {communityStatusLabel(route, now)}</span></span>
+                                <span className="tg-small block">{GUIDE_LABELS[route.guide_kind??'general']} · {route.path?.length_m} m · {communityStatusLabel(route, now)}</span></span>
                         </button>
                     </li>)}
                 </ul>
                 {inspected?.path && <div className="tg-stack">
                     <CommunityPathMap area={area} points={inspected.path.coordinates} />
+                    <p className="font-bold">{GUIDE_LABELS[inspected.guide_kind??'general']}</p>
+                    <p className="tg-small">Guide-level review confirms the public connection; it does not certify every accessibility attribute.</p>
+                    <div className="tg-note space-y-1">
+                        <strong>Path evidence today</strong>
+                        <p className="tg-small">{guideChecks.filter(c=>c.check).length} of {inspectedEdges.length} matched segments have current steps / kerb checks.</p>
+                        <p className="tg-small">Roof cover: {guideChecks.filter(c=>c.current.covered===true).length} mapped segments · {guideChecks.filter(c=>c.roof==='checked').length} field-checked roof conditions.</p>
+                        {!!routeHazards.length&&<p className="tg-small font-bold">{routeHazards.length} active path reports; planning will recheck your requirements.</p>}
+                    </div>
                     {inspected.notes && <p className="text-sm break-words">{inspected.notes}</p>}
                     <p className="tg-small">{inspected.review_note} {inspected.reviewer && `· ${inspected.reviewer}`}</p>
                     {inspected.opening_hours && <p className="tg-small">Checked public access hours · {inspected.opening_hours}</p>}
@@ -113,6 +136,12 @@ export default function CommunityRoutes({ area, dataset, graph, walks, startPoin
                     {inspected.status === 'verified' && inspected.valid_until && Date.parse(inspected.valid_until) > Date.parse(now)
                         ? <button type="button" className="tg-btn tg-btn-primary" onClick={() => onPlan(inspected)}>Plan from this route’s start</button>
                         : <p className="tg-small">Navigation becomes available after a current field check.</p>}
+                    {!!inspected.reviews?.length && <details className="tg-details"><summary>Review history · {inspected.reviews.length}</summary>
+                        <ol className="tg-stack mt-2">{inspected.reviews.map((review,index)=><li key={review.checked_at+index} className="tg-note">
+                            <p className="font-bold">{review.action==='verify'?stateNames.checked:review.action==='publish'?'Published':'Declined'}</p>
+                            <p className="tg-small">{communityDate(review.checked_at)} · {review.reviewer}</p><p className="tg-small">{review.note}</p>
+                            {review.valid_until&&<p className="tg-small">Review due {communityDate(review.valid_until)}</p>}
+                        </li>)}</ol></details>}
                     {onShare && <button type="button" className="tg-btn" onClick={async () => {
                         const copied = await onShare(inspected);
                         setShareMessage(residentText(language, copied ? 'Copied shortcut link' : 'Copy link failed'));
@@ -138,6 +167,7 @@ function CommunityRouteEditor({ area, dataset, graph, walks, startPoints, initia
         return fixes.length >= 4 ? fixes : [];
     });
     const [title, setTitle] = useState(draft?.title ?? '');
+    const [guideKind,setGuideKind]=useState<GuideKind>(draft?.guide_kind&&GUIDE_KINDS.includes(draft.guide_kind)?draft.guide_kind:'general');
     const [notes, setNotes] = useState(draft?.notes ?? '');
     const [points, setPoints] = useState<RoutePoint[]>(draft?.points ?? trace);
     const [trimStart, setTrimStart] = useState(trace.length ? 1 : 0);
@@ -200,9 +230,9 @@ function CommunityRouteEditor({ area, dataset, graph, walks, startPoints, initia
     }
 
     function currentDraft(): CommunityDraft {
-        const payload = { dataset_id: dataset, title: title.trim(), notes: notes.trim(), points: publicPoints };
+        const payload = { guide_kind:guideKind,dataset_id: dataset, title: title.trim(), notes: notes.trim(), points: publicPoints };
         const previous = lastDraft.current;
-        if (previous && previous.title === payload.title && previous.notes === payload.notes &&
+        if (previous && previous.title === payload.title && previous.notes === payload.notes && previous.guide_kind===payload.guide_kind &&
             JSON.stringify(previous.points) === JSON.stringify(payload.points)) return previous;
         return { ...payload, submission_id: crypto.randomUUID() };
     }
@@ -238,6 +268,10 @@ function CommunityRouteEditor({ area, dataset, graph, walks, startPoints, initia
     return <div className="tg-stack">
         <button type="button" className="tg-text-action self-start" onClick={onExit}>Back to community routes</button>
         <label className="tg-label">{residentText(language, 'Route name')}<input className="tg-input" maxLength={100} value={title} onChange={event => setTitle(event.target.value)} /></label>
+        <label className="tg-label">Guide purpose<select className="tg-input" value={guideKind} onChange={event=>setGuideKind(event.target.value as GuideKind)}>
+            {GUIDE_KINDS.map(kind=><option key={kind} value={kind}>{GUIDE_LABELS[kind]}</option>)}
+        </select></label>
+        <p className="tg-small">Suggestions remain unverified until a reviewer checks them. Share only a public pedestrian connection, not private journeys.</p>
         <label className="tg-label">{residentText(language, 'Local notes')}<textarea className="tg-input" maxLength={800} rows={2} value={notes}
             placeholder="For example, the covered shortcut between the station and market"
             onChange={event => setNotes(event.target.value)} /></label>

@@ -3,6 +3,8 @@ import { findFacilities, type FacilityKind } from './walk-tools.ts';
 import type { PathNode, PathEdge, HazardReport, Mode } from './routing.ts';
 import { WALK_BUDGETS, type JourneyPlan, type WalkingData, type PlanningInput } from './walking.ts';
 import type { CommunityRoute } from './community-routes.ts';
+import { compareMaintenanceImpact, type ImpactRequest } from './maintenance-impact.ts';
+import { planErrands, type ErrandRequest } from './errand-planner.ts';
 import { solarModel, type ShadeDataset } from './solar-shade.ts';
 
 export interface PlanningSnapshot {
@@ -14,7 +16,7 @@ export interface PlanningSnapshot {
 }
 
 export interface SearchCommand {
-    type: 'journey' | 'return' | 'discover' | 'facilities' | 'community';
+    type: 'journey' | 'return' | 'discover' | 'facilities' | 'community' | 'errands';
     input: PlanningInput | Omit<PlanningInput, 'destination' | 'entrance_id'>;
     feels_like?: number | null;
     kind?: FacilityKind;
@@ -22,6 +24,7 @@ export interface SearchCommand {
     community?: CommunityRoute;
     modes?: Mode[];
     suggestBudget?: boolean;
+    errands?: ErrandRequest;
 }
 
 export interface DepartureOption {
@@ -31,7 +34,7 @@ export interface DepartureOption {
     unknownSeconds: number;
 }
 
-export type PlanningCommand = SearchCommand | {
+export type PlanningCommand = SearchCommand | { type: 'impact'; request: ImpactRequest } | {
     type: 'departures';
     plan: SearchCommand;
     times: Array<{ departure: string; feels_like?: number | null }>;
@@ -58,13 +61,17 @@ export function dispatchPlan(snapshot: PlanningSnapshot, command: PlanningComman
                 reasons: [`A matching route takes about ${minutes} min. Your trip budget is ${input.needs.budget_min} min.`],
             } satisfies JourneyPlan;
         }
+        case 'impact': return compareMaintenanceImpact(nodes,edges,walking,hazards,command.request);
+        case 'errands':
+            if (!command.errands) throw Error('Choose your errands.');
+            return planErrands(nodes, edges, walking, command.input, command.errands, hazards, command.feels_like,model);
         case 'community':
             if (!command.community) throw Error('Choose a community route.');
             return planCommunityJourney(nodes, edges, walking, command.input, command.community, hazards, model);
         case 'return':
             return planReturnWalk(nodes, edges, walking, command.input, hazards, command.feels_like, model, command.modes);
         case 'discover':
-            return reachablePlaces(nodes, edges, walking, command.input, hazards, command.ids);
+            return reachablePlaces(nodes, edges, walking, command.input, hazards, command.ids,command.modes,model);
         case 'facilities':
             if (!command.kind) throw Error('Choose a facility type.');
             return findFacilities(nodes, edges, walking, command.input, command.kind, hazards, command.ids);

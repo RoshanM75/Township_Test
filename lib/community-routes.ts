@@ -6,7 +6,12 @@ import type { PilotId } from './pilots.ts';
 export type RoutePoint = [lat: number, lng: number];
 export const MAX_COMMUNITY_POINTS = 48;
 export type CommunityStatus = 'submitted' | 'published' | 'verified' | 'declined';
+export const GUIDE_KINDS = ['general','shortcut','shelter','step_free','entrance'] as const;
+export type GuideKind = typeof GUIDE_KINDS[number];
+export const GUIDE_LABELS: Record<GuideKind,string> = { general:'Local walking guide',shortcut:'Local connection',shelter:'Sheltered walking suggestion',step_free:'Step-free suggestion',entrance:'Entrance guide' };
+export interface CommunityReviewEvent { action:'publish'|'verify'|'decline'; reviewer:string; note:string; checked_at:string; opening_hours:string|null; valid_until:string|null }
 export interface CommunityDraft {
+    guide_kind?: GuideKind;
     submission_id: string;
     dataset_id: string;
     title: string;
@@ -34,6 +39,8 @@ export interface CommunityRoute {
     opening_hours: string | null;
     reviewer: string | null;
     review_note: string | null;
+    guide_kind?: GuideKind;
+    reviews?: CommunityReviewEvent[];
 }
 export const communityStatusLabel = (route: CommunityRoute, at = new Date().toISOString()) =>
     route.status === 'verified' && route.valid_until && route.valid_until <= at ? 'Field check expired'

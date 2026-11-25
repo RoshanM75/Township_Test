@@ -81,7 +81,9 @@ export function mappedAssets(raw:OsmSource, edges:PathEdge[], area:PilotId,
             ...(t.tourism?{tourism_type:t.tourism}:{}),
             ...(t.wikidata?{wikidata:t.wikidata}:{}),...(t.wikipedia?{wikipedia:t.wikipedia}:{}),...(t.website?{website:t.website}:{}),
             ...(t.wheelchair?{osm_wheelchair:t.wheelchair}:{}),...(kind==='rest'?{has_seat:true}:{}),...(t.covered?{osm_covered:t.covered}:{}),
-            ...(t.level?{osm_level:t.level}:{}),connection_model:joined?'nearest_mapped_path':'unconnected'};
+            ...(t.level?{osm_level:t.level}:{}), ...(t.amenity ? {osm_amenity:t.amenity}:{}), ...(t.shop?{osm_shop:t.shop}:{}),
+            ...(['yes','public','permissive'].includes(t.access)?{public_access:'public'}:t.access==='customers'?{public_access:'customers'}:t.access==='destination'?{public_access:'destination'}:t.access==='permit'?{public_access:'permission'}:{}),
+            ...(t.fee==='yes'||t.fee==='no'?{fee:t.fee==='yes'}:{}),connection_model:joined?'nearest_mapped_path':'unconnected'};
         return {id:sourceId(area,key),external_id:`${area}:${key}`,parent_id:parent,kind,category,name,lat:p[0],lng:p[1],source:'osm',
             source_ref:`https://www.openstreetmap.org/${element.type}/${element.id}`,properties,edge_id:joined?.edge.id??null,edge_fraction:joined?.fraction??null,
             connection_distance_m:joined?.distance??null,anchor_lat:joined?.point[1]??null,anchor_lng:joined?.point[0]??null};

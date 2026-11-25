@@ -714,3 +714,25 @@
     .tg-activity-number strong { font-size:1.85rem; }
 }
 .tg[data-scale="large"] .tg-activity-grid,.tg[data-scale="xlarge"] .tg-activity-grid { grid-template-columns:1fr; }
+
+/* Journey reliability cards stay in the expandable planning sheet. */
+.tg-reliability-card { display:grid; gap:.65rem; padding:.85rem; border:1px solid var(--line,#d7dfda); border-radius:1rem; background:var(--surface,#fff); }
+.tg-reliability-line { display:flex; gap:.5rem; justify-content:space-between; align-items:center; flex-wrap:wrap; }
+.tg-readiness-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.5rem; }
+.tg-readiness-grid>div { border:1px solid #dce3df; border-radius:.75rem; padding:.6rem; min-width:0; }
+.tg-readiness-grid dt { font-size:.73rem; line-height:1.35; color:inherit; opacity:.85; }
+.tg-readiness-grid dd { font-size:.9rem; font-weight:750; line-height:1.4; overflow-wrap:anywhere; margin-top:.25rem; }
+.tg-reliability-item { min-width:0; border:1px solid #dce3df; border-radius:.75rem; padding:.7rem; overflow-wrap:anywhere; }
+.tg-evidence-chip { display:inline-flex; align-items:center; text-align:center; font-size:.72rem; font-weight:750; padding:.2rem .5rem; border:1px solid currentColor; border-radius:1rem; line-height:1.4; }
+.tg-evidence-warn { color:#8a4a14; background:#fff7e7; }
+.tg-evidence-checked { color:#186049; background:#e7f6ee; }
+.tg-evidence-list { display:grid; gap:.4rem; font-size:.8rem; }
+.tg-evidence-list li { display:flex; gap:.5rem; justify-content:space-between; align-items:center; border-bottom:1px solid #dce3df; padding:.3rem 0; }
+.tg-evidence-list strong { text-align:right; white-space:nowrap; }
+.tg-reliability-actions { display:flex; flex-wrap:wrap; gap:.5rem; margin-top:.25rem; }
+.tg-reliability-actions>.tg-btn { flex:1 1 8rem; }
+.tg-reliability-preview { display:flex; justify-content:space-between; align-items:center; gap:.5rem; font-size:.75rem; }
+.tg-tabs button { position:relative; }
+.tg-routine-badge { position:absolute; top:.15rem; right:.35rem; border-radius:1rem; padding:.05rem .35rem; background:#8a2e43; color:white; font-weight:800; font-size:.64rem; }
+
+.tg[data-scale="large"] .tg-readiness-grid,.tg[data-scale="xlarge"] .tg-readiness-grid { grid-template-columns:1fr; }

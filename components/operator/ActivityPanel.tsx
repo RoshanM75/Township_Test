@@ -44,7 +44,7 @@ export default function ActivityPanel({ area, reviewerKey, onOpenCase }: {
         {!summary && !error && <p role="status">Loading pilot activity…</p>}
         {summary && <>
             <dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                {[['Reported', summary.reported], ['Checked', summary.checked], ['Fixed', summary.fixed], ['Dismissed', summary.dismissed],
+                {[['Reported', summary.reported], ['Checked', summary.checked], ['Fixed', summary.fixed], ['Field requests resolved',summary.resolved_field_checks], ['Dismissed', summary.dismissed],
                     ['Median time to check', hours(summary.median_check_hours)], ['Median time to fix', hours(summary.median_fix_hours)],
                     ['Open now', summary.open], ['Overdue now', summary.overdue]].map(([label, value]) => <div key={label}
                     className="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -52,7 +52,7 @@ export default function ActivityPanel({ area, reviewerKey, onOpenCase }: {
                     <dd className="mt-1 text-2xl font-extrabold tabular-nums">{value}</dd>
                 </div>)}
             </dl>
-            <p className="text-sm text-slate-600">Activity counts each event in the reporting period. Open and overdue totals reflect the current backlog.
+            <p className="text-sm text-slate-600">Activity counts each event in the reporting period. Field-check requests are shown separately from fixed defects. Open and overdue totals reflect the current backlog.
                 Updated {new Date(summary.as_of).toLocaleString('en-MY', { timeZone: 'Asia/Kuala_Lumpur', dateStyle: 'medium', timeStyle: 'short' })} MYT.</p>
             <div className="grid gap-4 lg:grid-cols-2">
                 <section className="min-w-0 space-y-3 rounded-xl border border-slate-200 p-3">
