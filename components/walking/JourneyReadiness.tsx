@@ -3,7 +3,7 @@
 import { ShieldCheck, ClipboardCheck, Clock, MapPin, AlertTriangle } from 'lucide-react';
 import type { JourneyRoute } from '@/lib/walking';
 import type { journeyReadiness } from '@/lib/journey-readiness';
-import type { ConditionState, RouteBarrier } from '@/lib/route-conditions';
+import { CONDITION_LABELS,type ConditionState,type RouteBarrier } from '@/lib/route-conditions';
 import { malaysiaTimeLabel, residentText, type ResidentLanguage } from '@/lib/resident-language';
 
 export const stateNames: Record<ConditionState, string> = {
@@ -20,7 +20,7 @@ export function JourneyBarriers({ barriers, onCheck, onFocus }: {
         <p className="tg-small">These are specific mapped barriers or information gaps, not alternative directions.</p>
         {barriers.slice(0, 6).map((barrier, index) => <article className="tg-reliability-item" key={barrier.target_type+barrier.target_id+barrier.field+index}>
             <div className="tg-reliability-line"><strong>{barrier.name}</strong><span className="tg-evidence-chip">{stateNames[barrier.state]}</span></div>
-            <p className="tg-small">{barrier.reason}</p>
+            <p className="tg-small"><strong>{CONDITION_LABELS[barrier.field]??barrier.field.replaceAll('_',' ')}</strong> · {barrier.reason}</p>
             <div className="tg-reliability-actions">
                 <button type="button" className="tg-text-action" onClick={() => onFocus(barrier.point)}><MapPin size={16} aria-hidden /> Show on map</button>
                 <button type="button" className="tg-text-action" onClick={() => onCheck(barrier)}><ClipboardCheck size={16} aria-hidden /> Request a field check</button>

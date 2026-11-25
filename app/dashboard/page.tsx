@@ -9,6 +9,7 @@ import type { MouseEvent } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import MaintenanceImpact from '@/components/operator/MaintenanceImpact';
+import { CONDITION_LABELS } from '@/lib/route-conditions';
 import PreviewNotice from '@/components/walking/PreviewNotice';
 import { IS_PAGES_PREVIEW } from '@/lib/site';
 import {
@@ -460,6 +461,7 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                                     </dl>
                                     <p className="text-sm font-bold">{reportStatus(selectedDefect)}
                                         {selectedDefect.responsible_team && ` · ${selectedDefect.responsible_team}`}</p>
+                                    {selectedDefect.requested_field && <p className="text-sm font-bold">Requested check: {CONDITION_LABELS[selectedDefect.requested_field]??selectedDefect.requested_field}</p>}
                                     {selectedDefect.shade_change && <p className="text-sm">{shadeChangeLabel[selectedDefect.shade_change]}
                                         {selectedDefect.observed_at && ` · Observed ${malaysiaTimeLabel(selectedDefect.observed_at, 'en', true)} MYT`}</p>}
                                     {selectedDefect.map_updated_at && <p className="text-sm">Map updated {malaysiaTimeLabel(selectedDefect.map_updated_at, 'en', true)} MYT</p>}

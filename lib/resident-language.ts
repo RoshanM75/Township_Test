@@ -1,7 +1,7 @@
 export type ResidentLanguage = 'en' | 'ms';
 
 const malay = {
-    'Request a field check': 'Minta semakan di lokasi', 'Journey readiness': 'Kesediaan perjalanan',
+    'Start and return': 'Mula dan kembali', 'Request a field check': 'Minta semakan di lokasi', 'Journey readiness': 'Kesediaan perjalanan',
     'Needs review': 'Perlu semakan', 'Recorded checks current': 'Semakan masih sah',
     'My usual routes': 'Laluan kebiasaan saya', 'Plan errands': 'Rancang urusan',
     'Walking together': 'Berjalan bersama', 'Save usual route': 'Simpan laluan kebiasaan',

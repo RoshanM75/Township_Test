@@ -40,7 +40,7 @@ import { errandRequestFromRoute, readErrands, type ErrandRequest } from '@/lib/e
 import { journeyReadiness } from '@/lib/journey-readiness';
 import { inspectRoutine, type RoutineFeed } from '@/lib/usual-routes';
 import { useRoutineFeeds } from '@/lib/use-routine-feeds';
-import type { RouteBarrier } from '@/lib/route-conditions';
+import { CONDITION_LABELS,type RouteBarrier } from '@/lib/route-conditions';
 import { observationFields } from '@/lib/verification-fields';
 import ComfortBreakdown from '@/components/walking/ComfortBreakdown';
 import type { EnvironmentLayer } from '@/lib/environment';
@@ -1015,7 +1015,7 @@ function ResidentPageContent() {
         if(!asset&&!edge){setLibraryMessage('This point is not a reportable target in the current dataset. Refresh the map and choose a mapped path.');return;}
         setRequestedField(observationFields(barrier.target_type).some(f=>f.key===barrier.field)?barrier.field:undefined);
         setReportEdgeId(edge?.id??null);setReportAsset(asset);setReportPoint(barrier.point);setSelectedKind('check_requested');
-        setReportNotes('Please check '+barrier.name+' — '+barrier.reason+'. Information requested; not a confirmed defect.');
+        setReportNotes('Please check '+(CONDITION_LABELS[barrier.field]??barrier.field)+' at '+barrier.name+' — '+barrier.reason+'. Information requested; not a confirmed defect.');
         setReportPhoto(null);setAutoNote(null);setReportMsg(null);setSearchOpen(false);setShowReportHistory(false);setShowReportModal(true);
     }
     function openAssetReport(asset: WalkingAsset) {
@@ -1370,9 +1370,9 @@ function ResidentPageContent() {
                     routeShade={view === 'plan' ? activeRoute?.sun_exposure?.stretches : undefined}
                     onShadeReport={openShadeReport}
                     startCoords={view === 'walk' && walkSession ? walkSession.pack.origin : selectedCommunity?.path?.coordinates[0] ?? userCoords}
-                    endCoords={activeRoute ? [activeRoute.entrance.lat, activeRoute.entrance.lng] : step === 'route' && destination && !errands && !returning && !communityId ? currentDest.coords : undefined}
+                    endCoords={activeRoute ? activeRoute.return_walk||activeRoute.errand_returns ? undefined : [activeRoute.entrance.lat,activeRoute.entrance.lng] : step === 'route' && destination && !errands && !returning && !communityId ? currentDest.coords : undefined}
                     endDetail={activeRoute ? [activeRoute.entrance.name, ...describeSpot(activeRoute.entrance)].join(' · ') : undefined}
-                    startLabel={t(usingGPS ? 'You' : 'Start')}
+                    startLabel={t(activeRoute?.return_walk||activeRoute?.errand_returns?'Start and return':usingGPS?'You':'Start')}
                     routeRoof={plannedRoof}
                     reduceMotion={prefs.reduceMotion}
                     highContrast={prefs.highContrast}
