@@ -151,6 +151,7 @@ export default function ResidentMap3D({
 }: Props) {
     const container = useRef<HTMLDivElement>(null);
     const mapRef = useRef<LibreMap | null>(null);
+    const deferredCamera = useRef<(() => void) | null>(null);
     const [loaded, setLoaded] = useState(false);
 
     useEffect(() => {
@@ -171,8 +172,14 @@ export default function ResidentMap3D({
         map.addControl(new AttributionControl({ compact: false }), 'bottom-left');
         map.once('style.load', () => setLoaded(true));
         map.once('webglcontextlost', onUnavailable);
-        const observer = new ResizeObserver(() => map.resize());
-        observer.observe(container.current);
+        const el = container.current;
+        const observer = new ResizeObserver(() => {
+            if (mapRef.current === map && el.isConnected && el.clientWidth && el.clientHeight) {
+                map.resize();
+                deferredCamera.current?.();
+            }
+        });
+        observer.observe(el);
         return () => {
             observer.disconnect();
             map.remove();
@@ -209,13 +216,24 @@ export default function ResidentMap3D({
     useEffect(() => {
         const map = mapRef.current;
         if (!loaded || !map) return;
-        const duration = reduceMotion ? 0 : 330;
-        if (focusLat !== undefined && focusLng !== undefined) {
-            map.easeTo({ center: lngLat([focusLat, focusLng]), zoom: Math.max(17, map.getZoom()), duration });
-        } else {
-            map.fitBounds(fit, { padding: { top: 54, left: 35, right: 45, bottom: 65 }, maxZoom: 17.8,
-                duration, pitch: map.getPitch(), bearing: map.getBearing() });
-        }
+        const applyCamera = () => {
+            const el = map.getContainer();
+            if (mapRef.current !== map) return;
+            if (!el.isConnected || !el.clientWidth || !el.clientHeight) {
+                deferredCamera.current = applyCamera;
+                return;
+            }
+            deferredCamera.current = null;
+            const duration = reduceMotion ? 0 : 330;
+            if (focusLat !== undefined && focusLng !== undefined) {
+                map.easeTo({ center: lngLat([focusLat, focusLng]), zoom: Math.max(17, map.getZoom()), duration });
+            } else {
+                map.fitBounds(fit, { padding: { top: 54, left: 35, right: 45, bottom: 65 }, maxZoom: 17.8,
+                    duration, pitch: map.getPitch(), bearing: map.getBearing() });
+            }
+        };
+        applyCamera();
+        return () => { if (deferredCamera.current === applyCamera) deferredCamera.current = null; };
     }, [loaded, fit, focusLat, focusLng, reduceMotion]);
 
     useEffect(() => {
