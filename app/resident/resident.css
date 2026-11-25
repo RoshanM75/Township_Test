@@ -656,3 +656,61 @@
 .tg-profile-progress-row .tg-profile-progress { flex:1; }
 .tg-profile-survey .tg-profile-actions { position:sticky;bottom:0;z-index:1;padding:.45rem 0 .2rem;background:#fff;box-shadow:0 -6px 14px #fff; }
 .tg-route-profile-match { width:fit-content;max-width:100%;padding:.15rem .4rem;color:var(--cover);background:var(--cover-light);border-radius:.45rem;font-weight:720;font-size:.78rem; }
+
+/* Profile activity: lightweight local history, with responsive bento cards and
+   readable period controls. No goals, scores or background activity tracking. */
+.tg-profile-section-links { display:flex;flex-wrap:wrap;gap:.45rem; }
+.tg-profile-section-links a { flex:1 1 9rem;display:flex;align-items:center;justify-content:center;gap:.45rem;min-height:2.8rem;padding:.42rem .6rem;background:var(--surface);border:var(--bw) solid var(--line);border-radius:.8rem;color:var(--brand-ink);font-weight:720;font-size:.91rem;text-align:center; }
+.tg-profile-activity { display:grid;gap:.65rem;padding:.65rem 0 .2rem;scroll-margin-top:.5rem; }
+.tg-activity-heading { display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.25rem .6rem; }
+.tg-activity-heading > div { flex:1 1 10rem;min-width:0;display:grid;gap:.18rem; }
+.tg-activity-heading > svg { color:var(--muted);flex:none; }
+.tg-activity-heading .tg-text-action,.tg-activity-empty .tg-text-action { min-height:2.75rem;display:flex;align-items:center;gap:.2rem;font-size:.86rem; }
+.tg-activity-periods { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.28rem;background:var(--brand-soft);border:var(--bw) solid var(--line);border-radius:.85rem;padding:.25rem; }
+.tg-activity-periods button { min-width:0;min-height:2.8rem;padding:.4rem .25rem;line-height:1.2;font-size:.88rem;font-weight:730;color:var(--muted);border:var(--bw) solid transparent;border-radius:.65rem;overflow-wrap:anywhere; }
+.tg-activity-periods button[aria-pressed="true"] { color:var(--brand-ink);border-color:var(--brand);background:var(--surface);box-shadow:0 1px 3px #27161c12; }
+.tg-activity-date { font-variant-numeric:tabular-nums; }
+.tg-activity-result { display:grid;gap:.55rem; }
+.tg-activity-grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.55rem; }
+.tg-activity-tile { min-width:0;display:flex;flex-direction:column;gap:.45rem;padding:.82rem;border:var(--bw) solid var(--line);border-radius:1rem;background:var(--surface); }
+.tg-activity-tile[data-tone="steps"] { background:var(--brand-soft); }
+.tg-activity-tile[data-tone="carbon"] { background:var(--cover-light); }
+.tg-activity-tile[data-tone="time"] { background:#faf0dc; }
+.tg-activity-tile h3 { display:flex;align-items:flex-start;gap:.35rem;font-size:.88rem;line-height:1.25;font-weight:730;color:var(--muted); }
+.tg-activity-tile h3 svg { flex:none;color:var(--brand-ink); }
+.tg-activity-tile[data-tone="carbon"] h3 svg { color:var(--cover); }
+.tg-activity-number { min-width:0;display:flex;align-items:baseline;gap:.28rem;flex-wrap:wrap;line-height:1.1;margin-top:auto;font-variant-numeric:tabular-nums; }
+.tg-activity-number strong { font-size:1.72rem;line-height:1.15;font-weight:810;letter-spacing:-.035em;max-width:100%;overflow-wrap:anywhere; }
+.tg-activity-number span { font-size:.95rem;font-weight:650;color:var(--muted); }
+.tg-activity-tile .tg-small { font-size:.8rem; }
+.tg-activity-coverage { display:flex;flex-wrap:wrap;justify-content:space-between;gap:.3rem .65rem;font-size:.86rem;color:var(--muted); }
+.tg-activity-coverage strong { color:var(--ink);font-weight:790;font-variant-numeric:tabular-nums; }
+.tg-activity-method { font-size:.86rem; }
+.tg-activity-method > div { margin-top:.6rem;line-height:1.45;color:var(--muted); }
+.tg-activity-method a { min-height:2.75rem;display:flex;align-items:center;overflow-wrap:anywhere; }
+.tg-activity-places { display:grid;gap:.55rem;border-top:var(--bw) solid var(--line);padding-top:.85rem;margin-top:.2rem; }
+.tg-activity-place-list { list-style:none;margin:0;padding:0;overflow:hidden;border:var(--bw) solid var(--line);border-radius:.95rem;background:var(--surface); }
+.tg-activity-place-list li+li { border-top:var(--bw) solid var(--line); }
+.tg-activity-place-list button { min-height:3.75rem;width:100%;display:flex;gap:.5rem;align-items:center;text-align:left;padding:.65rem;background:var(--surface);color:var(--ink); }
+.tg-activity-place-list button:focus-visible { outline-offset:-4px; }
+.tg-activity-place-list button:disabled { opacity:.65; }
+.tg-activity-place-list button > svg { flex:none;color:var(--muted); }
+.tg-activity-place-icon { width:2.3rem;height:2.3rem;flex:none;display:grid;place-items:center;border-radius:.65rem;background:var(--cover-light);color:var(--cover);border:var(--bw) solid var(--line); }
+.tg-activity-place-detail { flex:1;min-width:0;display:grid;gap:.16rem; }
+.tg-activity-place-detail strong { font-size:.95rem;font-weight:730;overflow-wrap:anywhere; }
+.tg-activity-place-detail small,.tg-activity-visit-count small { font-size:.8rem;color:var(--muted); }
+.tg-activity-visit-count { flex:none;max-width:28%;display:grid;justify-items:center;gap:.08rem;color:var(--brand-ink);font-size:1rem;font-weight:780;font-variant-numeric:tabular-nums;overflow-wrap:anywhere; }
+.tg-activity-empty { display:flex;flex-wrap:wrap;align-items:flex-start;gap:.5rem .6rem;padding:.85rem;border:var(--bw) solid var(--line);background:var(--surface);border-radius:.85rem;color:var(--muted);font-size:.88rem; }
+.tg-activity-empty > svg { color:var(--brand-ink);flex:none; }
+.tg-activity-empty > div { flex:1 1 8rem;min-width:0;display:grid;gap:.25rem; }
+.tg-activity-empty strong { color:var(--ink);font-weight:720; }
+.tg-visit-confirm { display:flex;align-items:flex-start;gap:.55rem;min-height:2.8rem;padding:.5rem;border:var(--bw) solid var(--line);border-radius:.75rem;background:var(--surface);cursor:pointer; }
+.tg-visit-confirm input { flex:none;width:1.25rem;height:1.25rem;accent-color:var(--brand);margin:.17rem 0; }
+.tg-visit-confirm span { min-width:0;display:grid;gap:.22rem; }
+.tg-visit-confirm small { font-size:.8rem;color:var(--muted);font-weight:500; }
+.tg.hc :is(.tg-activity-tile,.tg-activity-periods,.tg-activity-place-icon) { background:var(--surface);border-color:var(--line); }
+@media(max-width:380px) {
+    .tg-activity-grid { grid-template-columns:1fr; }
+    .tg-activity-number strong { font-size:1.85rem; }
+}
+.tg[data-scale="large"] .tg-activity-grid,.tg[data-scale="xlarge"] .tg-activity-grid { grid-template-columns:1fr; }

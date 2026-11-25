@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Pause, Play, LocateFixed, Flag, Navigation, Route } from 'lucide-react';
 import { addTrackFix } from '@/lib/walk-tracking';
+import { destinationForVisit } from '@/lib/profile-activity';
 import { DRAFT_KEY, type WalkSession, type CompletedWalk, type WalkFeedback as Feedback } from '@/lib/walk-library';
 import { residentText, type ResidentLanguage, type ResidentLabel } from '@/lib/resident-language';
 import { residentPlaceName, routeStepAt } from '@/lib/resident-walking';
@@ -18,6 +19,8 @@ export default function WalkRecorder({ session, onComplete, onFeedback, onPositi
     const [track, setTrack] = useState(session.track), trackRef = useRef(session.track);
     const [message, setMessage] = useState(session.restored ? 'Your unfinished walk was restored and paused. Resume when you are ready.' : 'Timer started. GPS recording is optional and stays on this device.');
     const [confirm, setConfirm] = useState(false), [completed, setCompleted] = useState<CompletedWalk | null>(null), [saved, setSaved] = useState(false);
+    const [reachedDestination, setReachedDestination] = useState(false);
+    const visitDestination = destinationForVisit(session.pack);
     const lastSave = useRef(0);
     const progress = useRef(0);
     const [guidance, setGuidance] = useState<{ index: number; onRoute: boolean }>();
@@ -89,7 +92,8 @@ export default function WalkRecorder({ session, onComplete, onFeedback, onPositi
     function finish() {
         const active = base + (paused ? 0 : Math.max(0, Date.now() - started));
         const result: CompletedWalk = { id: session.id, title: session.pack.title, started_at: session.started_at, finished_at: new Date().toISOString(),
-            profile: session.pack.profile,area_id:session.pack.area_id??'elmina', active_ms: active, track: trackRef.current, planned_m: session.pack.route.length_m, planned_min: session.pack.route.total_min, feedback: null };
+            profile: session.pack.profile,area_id:session.pack.area_id??'elmina', active_ms: active, track: trackRef.current, planned_m: session.pack.route.length_m, planned_min: session.pack.route.total_min, feedback: null,
+            ...(reachedDestination && visitDestination ? { confirmed_visit: visitDestination } : {}) };
         pause(); setGps(false); setConfirm(false); setCompleted(result);
         const ok = onComplete(result); setSaved(ok); if (ok) clearDraft();
     }
@@ -98,6 +102,7 @@ export default function WalkRecorder({ session, onComplete, onFeedback, onPositi
         <p className="tg-small">Pauses are excluded. Planned distance was {Math.round(completed.planned_m)} m; a planned route is not proof that you walked that distance.</p>
         {!saved ? <><p className="tg-note tg-warnbox" role="status">This walk has not been saved. You can free space in Saved and retry.</p><button className="tg-btn" onClick={() => { const ok=onComplete(completed);setSaved(ok);if(ok)clearDraft(); }}>Retry saving this walk</button><button className="tg-btn" onClick={() => { if(window.confirm('Leave this finished walk without saving its history or feedback?')) { clearDraft();onNewWalk(); } }}>Finish without saving</button></> : <>
             <p className="tg-small" role="status">Saved in your device walk history.</p>
+            {completed.confirmed_visit && <p className="tg-note">{t('Visit saved on this device.')}</p>}
             {onShareShortcut && <button type="button" className="tg-btn tg-btn-primary" onClick={() => onShareShortcut(completed)}><Route size={20} aria-hidden />{t('Share a local shortcut')}</button>}
             <WalkFeedback initial={null} onSave={feedback => onFeedback(completed.id, feedback)} />
             <button className="tg-btn" onClick={onNewWalk}>{t('Plan another walk')}</button>
@@ -128,8 +133,18 @@ export default function WalkRecorder({ session, onComplete, onFeedback, onPositi
                 else if (!navigator.geolocation) setMessage('This browser cannot record GPS. The timer is still available.');
                 else setGps(true);
             }}><LocateFixed size={20} aria-hidden />{t(gps ? 'Stop GPS recording' : 'Record GPS on this device')}</button>
-            {confirm ? <div className="tg-note"><p>{t('Save finished walk')}</p><div className="mt-2 grid gap-2"><button className="tg-btn" onClick={() => setConfirm(false)}>{t('Keep walking')}</button><button className="tg-btn tg-btn-primary" onClick={finish}>{t('Save finished walk')}</button></div></div>
-                : <button className="tg-btn" onClick={() => setConfirm(true)}><Flag size={20} aria-hidden />{t('Finish walk')}</button>}
+            {confirm ? <div className="tg-note tg-stack">
+                <p>{t('Save finished walk')}</p>
+                {visitDestination && <label className="tg-visit-confirm">
+                    <input type="checkbox" checked={reachedDestination} onChange={event => setReachedDestination(event.target.checked)} />
+                    <span><strong>{t('I reached this place')}: {visitDestination.name}</strong>
+                        <small>{t('Optional — adds a confirmed visit to your private profile.')}</small></span>
+                </label>}
+                <div className="grid gap-2">
+                    <button className="tg-btn" onClick={() => { setConfirm(false); setReachedDestination(false); }}>{t('Keep walking')}</button>
+                    <button className="tg-btn tg-btn-primary" onClick={finish}>{t('Save finished walk')}</button>
+                </div>
+            </div> : <button className="tg-btn" onClick={() => setConfirm(true)}><Flag size={20} aria-hidden />{t('Finish walk')}</button>}
             {children}
         </div>
     </>;

@@ -21,6 +21,7 @@ import { forecastAt, malaysiaInput, fromMalaysiaInput, type WalkingWeather } fro
 import { WALK_BUDGETS, type WalkingData, type WalkingAsset, type JourneyPlan } from '@/lib/walking';
 import RouteQualityBar from '@/components/walking/RouteQualityBar';
 import { WalkingProfilePanel, WalkingProfileSetup, WalkingProfileEditor, compactWalkingSummary } from '@/components/walking/WalkingProfile';
+import type { FrequentPlace } from '@/lib/profile-activity';
 import { newDeviceWalkingProfile, normaliseWalkingSettings, readDeviceWalkingProfile, writeDeviceWalkingProfile, sharedWalkingSettings, sharedWalkBudget, type WalkingSettings, type DeviceWalkingProfile } from '@/lib/walking-profile';
 import DepartureControl from '@/components/walking/DepartureControl';
 import DepartureOptions from '@/components/walking/DepartureOptions';
@@ -125,9 +126,9 @@ function readDeviceHazards(area: PilotId): DeviceHazard[] {
 
 type Step = 'where' | 'route' | 'walking';
 type TextScale = 'normal' | 'large' | 'xlarge';
-type Prefs = { mapMode: MapMode; scale: TextScale; highContrast: boolean; reduceMotion: boolean; vibrate: boolean; speak: boolean; language: ResidentLanguage };
+type Prefs = { mapMode: MapMode; scale: TextScale; highContrast: boolean; reduceMotion: boolean; vibrate: boolean; speak: boolean; language: ResidentLanguage; showActivity: boolean; showFrequentPlaces: boolean };
 
-const DEFAULT_PREFS: Prefs = { mapMode: '3d', scale: 'normal', highContrast: false, reduceMotion: false, vibrate: true, speak: false, language: 'en' };
+const DEFAULT_PREFS: Prefs = { mapMode: '3d', scale: 'normal', highContrast: false, reduceMotion: false, vibrate: true, speak: false, language: 'en', showActivity: true, showFrequentPlaces: true };
 const PREFS_KEY = 'townshipgo:prefs';
 const COMMUNITY_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const SCALE_PCT: Record<TextScale, string> = { normal: '100%', large: '112.5%', xlarge: '125%' };
@@ -325,6 +326,8 @@ function ResidentPageContent() {
             vibrate: stored?.vibrate !== false,
             speak: stored?.speak === true,
             language: stored?.language === 'ms' ? 'ms' : 'en',
+            showActivity: stored?.showActivity !== false,
+            showFrequentPlaces: stored?.showFrequentPlaces !== false,
         };
     });
     const language = prefs.language === 'ms' ? 'ms' : 'en';
@@ -659,7 +662,8 @@ function ResidentPageContent() {
     function resetWalkingProfile() {
         if (!window.confirm(t('Reset your saved walking profile and display preferences? Saved walks, history and reports will be kept.'))) return;
         if (persistWalkingProfile({ ...newDeviceWalkingProfile(), status: 'skipped' })) setProfileMessage('Your walking profile has been reset.');
-        setPrefs({ ...DEFAULT_PREFS, mapMode: prefs.mapMode, reduceMotion: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false });
+        setPrefs({ ...DEFAULT_PREFS, mapMode: prefs.mapMode, reduceMotion: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false,
+            showActivity: prefs.showActivity, showFrequentPlaces: prefs.showFrequentPlaces });
         setTripProfile(null); setChosenMode(null); setShowProfilePrivacy(false);
     }
 
@@ -765,7 +769,7 @@ function ResidentPageContent() {
     function finishRecording(walk: CompletedWalk) {
         const ok = changeLibrary({ ...libraryRef.current, history: [walk, ...libraryRef.current.history.filter(w => w.id !== walk.id)] });
         setPanelMinimized(false);
-        if (ok) { setSessionFinished(true); speak(t('Walk finished.')); } return ok;
+        if (ok) { setSessionFinished(true); setPlanningNow(new Date().toISOString()); speak(t('Walk finished.')); } return ok;
     }
     function saveFeedback(id: string, feedback: WalkFeedback) {
         if (!libraryRef.current.history.some(w => w.id === id)) return false;
@@ -1080,6 +1084,33 @@ function ResidentPageContent() {
         setView('plan');
     }
 
+    function planFrequentPlace(place: FrequentPlace) {
+        if (!isPilotAvailable(place.area)) {
+            setLibraryMessage(t('This place is no longer available in the current map.'));
+            return;
+        }
+        if (walkSession && !sessionFinished) {
+            setLibraryMessage(t('Finish the current walk before planning a new journey.'));
+            return;
+        }
+        if (place.area !== area) {
+            router.replace('/resident?' + new URLSearchParams({ area: place.area, destId: place.place_id }));
+            return;
+        }
+        const asset = places.find(item => item.id === place.place_id || item.external_id === place.place_id);
+        if (!asset && !loadingDb) {
+            setLibraryMessage(t('This place is no longer available in the current map.'));
+            return;
+        }
+        setTripProfile(null); setBudgetOverride(null); setDeparture(null); setPlanningNow(new Date().toISOString());
+        if (asset) selectSearchResult(asset);
+        else {
+            // Keep the selected start while current map data is still loading.
+            chooseDest(place.place_id); setExactDestination(place.name);
+            setPlaceQuery(''); setSearchOpen(false); setPanelMinimized(true); setStep('route'); setView('plan');
+        }
+    }
+
     function changeDeparture(value: string) {
         setDeparture(value);
         if (step === 'route') setInformationLayer('shade');
@@ -1286,6 +1317,7 @@ function ResidentPageContent() {
                     {view === 'saved' && <SavedWalks library={library} profile={deviceProfile.settings.profile} pace={deviceProfile.settings.needs.speed_mps} area={area} reports={reports} onChange={changeLibrary} onReplan={replanPack} onFeedback={saveFeedback}
                         onUsePace={useSavedWalkingPace} onShare={shareUpdate} />}
                     {view === 'profile' && <WalkingProfilePanel profile={deviceProfile} language={language}
+                        history={library.history} activityNow={Date.parse(planningNow)} showActivity={prefs.showActivity} showFrequentPlaces={prefs.showFrequentPlaces} onPlanFrequentPlace={planFrequentPlace}
                         savedCount={library.packs.length + library.history.length} communityReady={Boolean(walkingData?.dataset_id)}
                         onEdit={() => setProfileEditor('default')} onSetup={() => setShowProfileSetup(true)}
                         onDisplay={() => setShowSettings(true)} onSaved={() => setView('saved')}
@@ -1448,6 +1480,14 @@ function ResidentPageContent() {
                 <div className="tg-stack">
                     <p className="tg-note flex items-start gap-2"><LockKeyhole size={20} className="shrink-0" aria-hidden />{t('Your walking settings and display preferences are kept in this browser, not in an account. They are not included in a shared route link unless you choose to include them.')}</p>
                     <p className="tg-small">{t('Planning uses your selected walking area, start and destination. Saved walk packs can include the walking requirements used to plan them.')}</p>
+                    <SettingSwitch label={t('Show activity summaries')} language={language}
+                        hint={t('Hide or show this information on Profile. Your completed walks remain saved.')}
+                        checked={prefs.showActivity} onChange={value => setPref('showActivity', value)} />
+                    <SettingSwitch label={t('Show frequently visited places')} language={language}
+                        hint={t('Hide or show this information on Profile. Your completed walks remain saved.')}
+                        checked={prefs.showFrequentPlaces} onChange={value => setPref('showFrequentPlaces', value)} />
+                    <p className="tg-small">{t('Visit summaries come from arrivals you confirm. Remove a walk in Saved to remove its contribution, or hide the summaries on this device.')}</p>
+                    <button type="button" className="tg-btn" onClick={() => { setShowProfilePrivacy(false); setView('saved'); }}>{t('View history')}</button>
                     <p className="tg-small">{t('Resetting does not delete walks, shortcuts or reports you have already saved or submitted.')}</p>
                     <button type="button" className="tg-btn tg-btn-outline" onClick={resetWalkingProfile}>{t('Reset walking profile')}</button>
                 </div>

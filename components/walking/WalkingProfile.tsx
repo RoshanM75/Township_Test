@@ -11,6 +11,9 @@ import { type WalkingNeeds, type ComfortPreference } from '@/lib/walking';
 import { normaliseWalkingSettings, type DeviceWalkingProfile, type WalkingSettings } from '@/lib/walking-profile';
 import { residentText, type ResidentLabel, type ResidentLanguage } from '@/lib/resident-language';
 import WalkingRequirements from './WalkingRequirements';
+import ProfileActivity from './ProfileActivity';
+import type { CompletedWalk } from '@/lib/walk-library';
+import type { FrequentPlace } from '@/lib/profile-activity';
 
 type DisplayChoices = { language: ResidentLanguage; scale: 'normal' | 'large' | 'xlarge'; speak: boolean };
 type Translate = (label: ResidentLabel) => string;
@@ -271,9 +274,10 @@ function ProfileCard({ title, Icon, children, type }: { title: string; Icon: Luc
     </section>;
 }
 
-export function WalkingProfilePanel({ profile, language, onEdit, onSetup, onDisplay, onSaved, onReports, onCommunity, onPrivacy, communityReady, savedCount }: {
+export function WalkingProfilePanel({ profile, language, onEdit, onSetup, onDisplay, onSaved, onReports, onCommunity, onPrivacy, communityReady, savedCount, history, activityNow, showActivity, showFrequentPlaces, onPlanFrequentPlace }: {
     profile: DeviceWalkingProfile; language: ResidentLanguage; onEdit: () => void; onSetup: () => void; onDisplay: () => void;
     onSaved: () => void; onReports: () => void; onCommunity: () => void; onPrivacy: () => void; communityReady: boolean; savedCount: number;
+    history: readonly CompletedWalk[]; activityNow: number; showActivity: boolean; showFrequentPlaces: boolean; onPlanFrequentPlace: (place: FrequentPlace) => void;
 }) {
     const t: Translate = label => residentText(language, label);
     const { settings, status } = profile;
@@ -296,6 +300,10 @@ export function WalkingProfilePanel({ profile, language, onEdit, onSetup, onDisp
             <div><span className="tg-label">{t('Profile')}</span><h1>{t('My walking profile')}</h1><p>{t('Made for the way you walk.')}</p></div>
         </header>
         <p className="tg-profile-private tg-small"><LockKeyhole size={14} aria-hidden />{t('On this device')}</p>
+        <nav className="tg-profile-section-links" aria-label={t('Profile sections')}>
+            <a href="#profile-activity"><Footprints size={18} aria-hidden />{t('Activity')}</a>
+            <a href="#profile-settings"><Settings2 size={18} aria-hidden />{t('Profile settings')}</a>
+        </nav>
         {status !== 'complete' && <aside className="tg-profile-setup-cta">
             <strong>{t('Set up your walking profile')}</strong><p className="tg-small">{t('Complete the short setup to personalise future walks.')}</p>
             <button type="button" className="tg-btn tg-btn-primary" onClick={onSetup}>{t('Finish setup')}<ChevronRight size={19} aria-hidden /></button>
@@ -319,7 +327,9 @@ export function WalkingProfilePanel({ profile, language, onEdit, onSetup, onDisp
                 {comfort.length ? <div className="tg-profile-chips">{comfort.map(({ id,label,Icon }) => <span key={id}><Icon size={17} aria-hidden />{t(label)}</span>)}</div> : <strong className="tg-profile-value">{t('Balanced route choices')}</strong>}
             </ProfileCard>
         </div>
-        <h2 className="tg-h2">{t('Profile settings')}</h2>
+        <ProfileActivity history={history} now={activityNow} language={language} showActivity={showActivity}
+            showFrequentPlaces={showFrequentPlaces} onSaved={onSaved} onPrivacy={onPrivacy} onPlan={onPlanFrequentPlace} />
+        <h2 className="tg-h2" id="profile-settings" tabIndex={-1}>{t('Profile settings')}</h2>
         <div className="tg-profile-rows">{rows.map(({ label, Icon, action, hint, disabled }) =>
             <button key={label} type="button" onClick={action} disabled={disabled}><Icon size={21} aria-hidden /><span>{t(label)}</span>{hint && <small>{hint}</small>}<ChevronRight size={18} aria-hidden /></button>)}</div>
         <p className="tg-small">{t('Route preferences are saved on this device. No account is required.')}</p>
