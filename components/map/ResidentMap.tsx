@@ -56,7 +56,7 @@ export default function ResidentMap({
         <div data-map-mode={mode} className="resident-map absolute inset-0" aria-label={t('Walking map')}>
             {mode === '2d'
                 ? <Map2D key={area} {...mapProps} language={language} informationLayer={informationLayer} showLayerControls={false} conditionSegments={segments}
-                    localBasemap={sitePath(`/map-area/${area}.geojson`)} mapAppearance={appearance} showTerrain={terrainVisible} terrainDetail={terrain} />
+                    localBasemap={sitePath(`/map-area/${area}.geojson`)} mapAppearance={appearance} showTerrain={terrainVisible&&appearance==='detailed'} terrainDetail={terrain} />
                 : <Map3D key={area} {...mapProps} language={language} area={area} segments={segments} informationLayer={informationLayer} onUnavailable={fallback} terrainDetail={terrain} showTerrain={terrainVisible} showTerrainMesh={showTerrainMesh} />}
             <div className="tg-map-controls">
                 <div className="tg-map-mode-switch" role="group" aria-label={t('Map view')}>

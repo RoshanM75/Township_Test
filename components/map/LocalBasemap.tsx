@@ -259,9 +259,12 @@ export default function LocalBasemap({url,appearance,showTerrain,terrain,labelSc
     const layer=useMemo(()=>prepared?new DetailCanvas(prepared,area,options):null,[prepared,area]); // eslint-disable-line react-hooks/exhaustive-deps
     useEffect(()=>{if(!layer)return;map.addLayer(layer);return()=>{map.removeLayer(layer);};},[layer,map]);
     useEffect(()=>{layer?.setOptions(options);const pane=map.getPane('pilot-basemap');if(pane)pane.style.zIndex=appearance==='street'?'190':'240';},[layer,options,map,appearance]);
+    useEffect(()=>{map.attributionControl?.setPrefix(false);},[map]);
     useEffect(()=>{
         if(!terrain||!showTerrain||appearance!=='detailed')return;
-        const control=map.attributionControl;const attribution=terrain.attribution;control?.addAttribution(attribution);return()=>{control?.removeAttribution(attribution);};
+        const control=map.attributionControl;
+        const attribution='<a href="https://open-meteo.com/en/docs/elevation-api" title="Copernicus DEM / Open-Meteo — CC BY 4.0">Copernicus DEM / Open-Meteo</a>';
+        control?.addAttribution(attribution);return()=>{control?.removeAttribution(attribution);};
     },[map,terrain,showTerrain,appearance]);
     return source?.url===url&&source.failed?<div className="tg-map-loading" role="status">{residentText(language,'Detailed map unavailable; street map shown.')}</div>:null;
 }
