@@ -1,6 +1,21 @@
 export type ResidentLanguage = 'en' | 'ms';
 
 const malay = {
+    'Surface': 'Permukaan',
+    'Map appearance': 'Gaya peta', 'Detailed streets': 'Jalan terperinci', 'Original street map': 'Peta jalan asal',
+    'Terrain relief': 'Relief muka bumi', '3D ground terrain': 'Muka bumi 3D', 'View hills and valleys in perspective.': 'Lihat bukit dan lembah dalam perspektif.', '20 m contours': 'Kontur 20 m', 'Terrain model': 'Model muka bumi', 'sample spacing': 'jarak sampel',
+    'Terrain data unavailable': 'Data muka bumi tidak tersedia', 'Map detail': 'Butiran peta',
+    'Approximate terrain, not a footpath slope measurement.': 'Anggaran muka bumi, bukan ukuran kecerunan laluan.',
+    'Mapped building': 'Bangunan dipetakan', 'Mapped building section': 'Bahagian bangunan dipetakan', 'Mapped roof or canopy': 'Bumbung atau kanopi dipetakan',
+    'Recorded height': 'Ketinggian direkodkan', 'Estimated height': 'Anggaran ketinggian', 'mapped floors': 'tingkat dipetakan',
+    'Height unknown; simplified 3D shape.': 'Ketinggian tidak diketahui; bentuk 3D ringkas.',
+    'Mapped roof shape': 'Bentuk bumbung dipetakan', 'Building outline; mapped sections shown separately.': 'Garis luar bangunan; bahagian dipetakan ditunjuk berasingan.',
+    'Mapped steps': 'Tangga dipetakan', 'Mapped crossing': 'Lintasan dipetakan', 'Mapped covered path': 'Laluan berbumbung dipetakan',
+    'Mapped footpath': 'Laluan pejalan kaki dipetakan', 'Mapped street': 'Jalan dipetakan', 'Mapped railway': 'Rel dipetakan', 'Mapped place': 'Tempat dipetakan',
+    'Restricted access; map context only.': 'Akses terhad; konteks peta sahaja.', 'Mapped level': 'Aras dipetakan',
+    'Bridge or elevated connection': 'Jambatan atau laluan bertingkat', 'Underground connection': 'Laluan bawah tanah',
+    'Estimated elevation': 'Anggaran aras ketinggian', 'OpenStreetMap · access needs field checking.': 'OpenStreetMap · akses perlu disemak di lokasi.',
+    'Detailed map unavailable; street map shown.': 'Peta terperinci tidak tersedia; peta jalan dipaparkan.',
     'Loading detailed map…': 'Memuatkan peta terperinci…',
     'Your stops': 'Hentian anda',
 

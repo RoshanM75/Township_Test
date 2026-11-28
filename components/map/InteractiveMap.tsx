@@ -9,15 +9,18 @@ import { environmentSegments, environmentCoverage, type EnvironmentLayer, type E
 import { DEFAULT_ORIGIN } from '@/lib/precinct';
 import { residentText, type ResidentLanguage } from '@/lib/resident-language';
 import { MAP_CAUTION, ROOF_COVER, ROUTE_ALTERNATIVE, ROUTE_OUTLINE, WALK_ROUTE, WALK_ROUTE_HC, mapFacilitySymbol } from './walking-map-theme';
-import { MapContainer, TileLayer, GeoJSON, Pane, Marker, Popup, Polyline, Tooltip, CircleMarker, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Pane, Marker, Popup, Polyline, Tooltip, CircleMarker, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
-import type { FeatureCollection } from 'geojson';
 import 'leaflet/dist/leaflet.css';
 import './resident-map.css';
 import { Plus, Minus, Route as RouteIcon, Layers } from 'lucide-react';
 import type { ShadeStretch } from '@/lib/route-shade';
 import type { SolarModel } from '@/lib/solar-shade';
 import { shadeLabel } from '@/lib/shade-display';
+import LocalBasemap from './LocalBasemap';
+import type { MapAppearance, TerrainDetail } from '@/lib/map-detail';
+import { useMapTerrain } from './useMapTerrain';
+import { isPilot } from '@/lib/pilots';
 
 interface RouteItem {
     id: string;
@@ -75,6 +78,10 @@ export interface InteractiveMapProps {
     informationLayer?: EnvironmentLayer | 'routes';
     showLayerControls?: boolean;
     localBasemap?: string;
+    mapAppearance?: MapAppearance;
+    showTerrain?: boolean;
+    showTerrainMesh?: boolean;
+    terrainDetail?: TerrainDetail | null;
     onInformationLayerChange?: (layer: EnvironmentLayer | 'routes') => void;
     focusLocation?: [number, number];
     liveLocation?: [number, number];
@@ -103,31 +110,6 @@ class ResidentCanvas extends L.Canvas {
     _redraw() {
         if (this.attached) leafletCanvasRedraw.call(this);
     }
-}
-
-function LocalBasemap({ url }: { url: string }) {
-    const renderer = useMemo(() => new ResidentCanvas({ pane: 'pilot-basemap' }), []);
-    const [data, setData] = useState<FeatureCollection | null>(null);
-    useEffect(() => {
-        const controller = new AbortController();
-        fetch(url, { signal: controller.signal }).then(response => {
-            if (!response.ok) throw Error('Map source unavailable');
-            return response.json();
-        }).then(setData).catch(() => { /* Routes and pins are still available. */ });
-        return () => controller.abort();
-    }, [url]);
-
-    return data && <GeoJSON data={data} interactive={false} filter={feature => feature.geometry.type !== 'Point'}
-        style={feature => {
-            const kind = feature?.properties.kind;
-            if (kind === 'building') return { renderer, color: '#a9acb4', fillColor: '#c2c4ca', fillOpacity: 0.85, weight: 1 };
-            if (kind === 'green' || kind === 'water') return { renderer, stroke: false, fillColor: kind === 'water' ? '#b6dbe0' : '#cfdcc6', fillOpacity: 1 };
-            if (kind === 'street') return feature?.properties.road === 'major'
-                ? { renderer, color: '#e3c498', weight: 6 } : { renderer, color: '#fffefa', weight: 4 };
-            if (kind === 'watercourse') return { renderer, color: '#91b9ce', weight: 3 };
-            if (kind === 'rail') return { renderer, color: '#86909a', weight: 1.5, dashArray: '4 3' };
-            return { renderer, color: '#a8a392', opacity: 0.65, weight: 1, dashArray: '3 3' };
-        }} />;
 }
 
 const assetIcon = (symbol: string) => L.divIcon({ className: 'tg-leaflet-facility', iconSize: [44,44], iconAnchor: [22,22],
@@ -279,6 +261,11 @@ function MapBehavior({
         return () => { active = false; ro.disconnect(); };
     }, [map]);
 
+    useEffect(()=>{
+        const scale=L.control.scale({position:'bottomright',imperial:false,maxWidth:90});scale.addTo(map);
+        return()=>{scale.remove();};
+    },[map]);
+
     // Taps on our buttons must not reach the map
     const stopPropagation = useCallback((el: HTMLDivElement | null) => {
         if (el) {
@@ -364,13 +351,16 @@ export default function InteractiveMap({
     selectedLocation,
     environment,
     informationLayer,
-    conditionSegments, routeShade, describeAsset, onShadeReport,
+    conditionSegments, routeShade, describeAsset, onShadeReport, solar, shadeAt,
     showLayerControls = true,
-    localBasemap,
+    localBasemap, mapAppearance = 'detailed', showTerrain = true, terrainDetail,
     onInformationLayerChange,
     focusLocation,
     liveLocation,
 }: InteractiveMapProps) {
+    const baseArea=localBasemap?.match(/\/map-area\/([^/]+)\.geojson$/)?.[1];
+    const localTerrain=useMapTerrain(terrainDetail===undefined&&isPilot(baseArea)?baseArea:undefined);
+    const terrain=terrainDetail===undefined?localTerrain.detail:terrainDetail;
     const endCoords=requestedEndCoords??startCoords;
     const hasDestination=Boolean(requestedEndCoords);
     const brand = highContrast ? WALK_ROUTE_HC : WALK_ROUTE;
@@ -473,12 +463,14 @@ export default function InteractiveMap({
                 scrollWheelZoom
                 className="w-full h-full"
                 zoomControl={false}
+                maxZoom={localBasemap ? 21 : 19}
                 zoomAnimation={zoomAnimation}
                 fadeAnimation={!reduceMotion}
                 renderer={renderer}
                 preferCanvas={Boolean(localBasemap)}
             >
-                {localBasemap && <Pane name="pilot-basemap" style={{ zIndex: 190 }}><LocalBasemap url={localBasemap} /></Pane>}
+                {localBasemap && <Pane name="pilot-basemap" style={{ zIndex: mapAppearance==='street'?190:240 }}><LocalBasemap url={localBasemap} appearance={mapAppearance} showTerrain={showTerrain} terrain={terrain}
+                    labelScale={labelScale} language={language} highContrast={highContrast} inspect={!onLocationSelect&&!overview} solar={layer==='shade'?solar:undefined} shadeAt={shadeAt}/></Pane>}
                 <TileLayer
                     key={largeTiles ? 'large-labels' : 'regular-labels'}
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'
@@ -487,6 +479,7 @@ export default function InteractiveMap({
                     zoomOffset={largeTiles ? -1 : 0}
                     minNativeZoom={largeTiles ? 1 : 0}
                     maxNativeZoom={largeTiles ? 20 : 19}
+                    maxZoom={localBasemap?21:19}
                 />
                 <LocationPicker onSelect={onLocationSelect} />
                 {segments.map(segment => {

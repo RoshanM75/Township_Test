@@ -20,7 +20,9 @@ OpenStreetMap data is available under the [Open Database Licence](https://www.op
 
 The 3D basemap draws streets, buildings, footpaths, water, parks and place labels from committed OpenStreetMap extracts. The supplementary street, rail and landscape data is used for display. The walking graphs are built from their independent pedestrian source bundles. [Pasar Seni map context](../data/pasar-seni/source/map-context-source.json) · [UM map context](../data/um-campus/source/map-context-source.json) · [Elmina map context](../data/elmina/sources.json)
 
-The 2D street map loads standard OpenStreetMap tiles over the bundled geometry. The default tile URL is `https://tile.openstreetmap.org/{z}/{x}/{y}.png`. The build supports changing the OpenStreetMap tile endpoint with `NEXT_PUBLIC_OSM_TILE_URL`. [OpenStreetMap tile usage policy](https://operations.osmfoundation.org/policies/tiles/)
+The detailed 2D map renders the same local geometry with zoom-dependent street and place labels, and preserves the original OpenStreetMap street-tile style as an option. The default tile URL is `https://tile.openstreetmap.org/{z}/{x}/{y}.png`. The build supports changing the OpenStreetMap tile endpoint with `NEXT_PUBLIC_OSM_TILE_URL`. [OpenStreetMap tile usage policy](https://operations.osmfoundation.org/policies/tiles/)
+
+The shared terrain, richer map geometry and source limits are described in [Detailed maps](detailed-maps.md).
 
 The 3D map bundles Noto Sans glyphs under the SIL Open Font License for local label rendering. [Glyph source](https://github.com/maplibre/demotiles/tree/601ae60796ceceda2cbd2ed3d2ea92d17a84be4b/font/Noto%20Sans%20Regular) · [Font licence](../public/map-fonts/OFL.txt)
 
