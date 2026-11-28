@@ -49,7 +49,7 @@ for(const area of metadata.areas){
     assert.ok(terrain.sample_count > 100 && terrain.source_resolution_m === 90, `Missing dated elevation grid for ${area}.`);
     assert.ok(terrain.sample_spacing_m >= terrain.source_resolution_m && terrain.max_m > terrain.min_m);
     assert.ok(mapArea.features.some(feature => feature.properties.kind === 'contour'), `Missing local terrain contours for ${area}.`);
-    assert.ok(mapArea.features.filter(feature => feature.properties.kind === 'building').every(feature => ['height','levels','approximate'].includes(feature.properties.heightSource) && Number.isFinite(feature.properties.height) && feature.properties.height > feature.properties.base), `Invalid building dimensions for ${area}.`);
+    assert.ok(mapArea.features.filter(feature => feature.properties.kind === 'building').every(feature => ['height','levels','approximate','satellite','overture-height','survey'].includes(feature.properties.heightSource) && Number.isFinite(feature.properties.height) && feature.properties.height > feature.properties.base), `Invalid building dimensions for ${area}.`);
     await access(new URL(`map-area/${area}-terrain/relief.png`,out));
     const [w,s,e,n]=terrain.bounds;
     for(let z=terrain.minzoom;z<=terrain.maxzoom;z++){
@@ -58,6 +58,11 @@ for(const area of metadata.areas){
     }
     const solar = JSON.parse(await readFile(new URL(`map-area/${area}-shade.json`, out), 'utf8'));
     assert.ok(solar.centre.every(Number.isFinite) && Array.isArray(solar.objects), `Invalid shade geometry for ${area}.`);
+    const world=JSON.parse(await readFile(new URL(`map-area/${area}-world.json`,out),'utf8'));
+    assert.equal(world.area,area);assert.equal(world.version,1);assert.ok(Object.keys(world.geometry).length&&world.sources.some(s=>s.id==='osm'));
+    assert.ok(mapArea.features.some(feature=>feature.properties.kind==='infrastructure'));
+    assert.equal(solar.coverage,'partial');
+    await access(new URL(`map-area/${area}-survey-gaps.csv`,out));await access(new URL(`map-area/${area}-survey-gaps.geojson`,out));
     if (area !== 'elmina') assert.ok(solar.objects.length, `Missing mapped-height buildings for ${area}.`);
     for (const neighbourhood of context.neighbourhoods ?? []) {
         const [lat, lng] = neighbourhood.coordinates;

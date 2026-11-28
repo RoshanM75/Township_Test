@@ -17,6 +17,7 @@ export default function WalkingRequirements({ needs, profile, onChange, language
                     ['avoid_uncontrolled_crossings', 'Use controlled or marked crossings'],
                     ['avoid_uneven_surfaces', 'Avoid uneven or broken surfaces'],
                     ['require_tactile_crossings', 'Require tactile paving at crossings'],
+                    ['require_tactile_continuity', 'Require checked continuous tactile guidance'],
                     ['require_audible_crossings', 'Require audible pedestrian signals at crossings'],
                     ['verified_only', 'Require current checks for critical conditions'],
                     ['require_rests', 'I need regular, verified rest facilities'],

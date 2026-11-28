@@ -73,12 +73,12 @@ test('Pages data uses the project prefix, a current planning clock and never sen
         import assert from 'node:assert/strict';
         import {loadGraph,loadWalkingData,loadHazards,loadReports,submitReport,createWalkingAsset,recordVerification,markReportFixed,loadWeather} from './lib/api.ts';
         const urls=[];
-        globalThis.fetch=async url=>{urls.push(url);return Response.json(String(url).includes('walking-data')?{assets:[],verifications:[],as_of:'2000-01-01T00:00:00Z'}:{});};
+        globalThis.fetch=async url=>{urls.push(url);return Response.json(String(url).includes('walking-data')?{assets:[],verifications:[],as_of:'2000-01-01T00:00:00Z'}:String(url).includes('/graph.json')?{source:{area_id:'elmina'},nodes:[],edges:[]}:{});};
         await loadGraph();const walking=await loadWalkingData();await loadHazards();await loadReports('all');
-        assert.deepEqual(urls,['/Township_Test/pilot/graph.json','/Township_Test/pilot/walking-data.json','/Township_Test/pilot/hazards.json','/Township_Test/pilot/reports.json']);
+        assert.deepEqual(urls,['/Township_Test/pilot/graph.json','/Township_Test/map-area/elmina-world.json','/Township_Test/pilot/walking-data.json','/Township_Test/pilot/hazards.json','/Township_Test/pilot/reports.json']);
         assert.ok(Math.abs(Date.parse(walking.as_of)-Date.now())<2000);
         for(const call of [()=>submitReport({}),()=>createWalkingAsset({}),()=>recordVerification({}),()=>markReportFixed('1')])await assert.rejects(call,/Nothing was submitted/);
-        assert.equal(urls.length,4);
+        assert.equal(urls.length,5);
         globalThis.fetch=async ()=>{throw new Error('Weather outage');};
         const weather=await loadWeather();assert.equal(weather.source,'unavailable');assert.equal(weather.feels_like_c,null);
     `], { env: { ...process.env, NEXT_PUBLIC_SITE_MODE: 'pages', NEXT_PUBLIC_BASE_PATH: '/Township_Test' } });
@@ -88,8 +88,8 @@ test('area-scoped public data keeps the project prefix and distinct source files
     execFileSync(process.execPath,['--input-type=module','-e',`
         import assert from 'node:assert/strict';
         import {loadGraph,loadWalkingData,loadHazards,loadReports,loadPilotContext} from './lib/api.ts';
-        const urls=[];globalThis.fetch=async url=>{urls.push(url);return Response.json({});};
+        const urls=[];globalThis.fetch=async url=>{urls.push(url);return Response.json(String(url).includes('/graph.json')?{source:{area_id:'pasar-seni'},nodes:[],edges:[]}:{});};
         await loadGraph('pasar-seni');await loadWalkingData('elmina');await loadHazards('pasar-seni');await loadReports('all','elmina');await loadPilotContext('pasar-seni');
-        assert.deepEqual(urls,['/Township_Test/pilot/pasar-seni/graph.json','/Township_Test/pilot/elmina/walking-data.json','/Township_Test/pilot/pasar-seni/hazards.json','/Township_Test/pilot/elmina/reports.json','/Township_Test/pilot/pasar-seni/context.json']);
+        assert.deepEqual(urls,['/Township_Test/pilot/pasar-seni/graph.json','/Township_Test/map-area/pasar-seni-world.json','/Township_Test/pilot/elmina/walking-data.json','/Township_Test/pilot/pasar-seni/hazards.json','/Township_Test/pilot/elmina/reports.json','/Township_Test/pilot/pasar-seni/context.json']);
     `],{env:{...process.env,NEXT_PUBLIC_SITE_MODE:'pages',NEXT_PUBLIC_BASE_PATH:'/Township_Test'}});
 });

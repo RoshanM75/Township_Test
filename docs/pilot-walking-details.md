@@ -40,7 +40,7 @@ To fetch current Prasarana feeds, run `npm run data:details -- --fetch-gtfs` fro
 | File in the source directory | Input |
 | --- | --- |
 | `um-shuttle.zip` and `um-shuttle.source.json` | Current UM operator GTFS with reuse permission. The source JSON has `url`, `license` and `data_at`. Until supplied, the UM shuttle link opens the operator's information. [UM Transport](https://jhb.um.edu.my/transport) |
-| `pasar-seni.shade.geojson` or `um-campus.shade.geojson` | Reusable local WGS84 polygons with `kind` set to `canopy` or `building` and numeric `height_m` on each feature. The collection includes `source_url`, `license` and `data_at`. |
+| `pasar-seni.shade.geojson` or `um-campus.shade.geojson` | Reusable local WGS84 polygons with `kind` set to `canopy` or `building` and numeric `height_m` on each feature. The collection includes `source_url`, an explicit free redistribution `license`, and `data_at`; `osm_ref` associates a measured building height with its existing footprint. The reusable source geometry is retained as `data/<area>/source/pedestrian-survey.geojson` so 2D/3D and solar estimates share it. Do not supply private field reports. See the [shared pedestrian world model](pedestrian-digital-twin.md). |
 | `rapid-rail-od.csv` | Published station-to-station journeys. Counts describe transit trips and feed the district context panel. |
 | `<area>.wikidata.json` | Geographic Wikidata SPARQL JSON results. Existing landmark links come from IDs in OSM. |
 | `<area>.scenes.json` | Sentinel-2 or ESA WorldCover STAC search results. The app displays scene metadata and footprints to support survey planning. |

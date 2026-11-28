@@ -19,9 +19,12 @@ export default function WalkingConditions({ night, forecast, onCompare, onInspec
         <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
             {forecast?.feels_like_c != null && <span className="rounded-full border border-emerald-200 bg-white px-3 py-1.5">Forecast feels like {Math.round(forecast.feels_like_c)}°C</span>}
             {forecast?.rain_probability != null && <span className="rounded-full border border-emerald-200 bg-white px-3 py-1.5">{Math.round(forecast.rain_probability)}% rain probability</span>}
+            {forecast?.direct_radiation!=null&&<span className="rounded-full border border-emerald-200 bg-white px-3 py-1.5">Direct sun {Math.round(forecast.direct_radiation)} W/m²</span>}
+            {forecast?.cloud_cover!=null&&<span className="rounded-full border border-emerald-200 bg-white px-3 py-1.5">Cloud {Math.round(forecast.cloud_cover)}%</span>}
+            {forecast?.humidity!=null&&<span className="rounded-full border border-emerald-200 bg-white px-3 py-1.5">Humidity {Math.round(forecast.humidity)}%</span>}
             {!forecast && <span className="text-slate-600">Hourly forecast unavailable · path estimates still apply</span>}
         </div>
-        {forecast&&<p className="mt-2 text-xs">Weather: <a href="https://open-meteo.com/" target="_blank" rel="noreferrer" className="font-bold underline">Open-Meteo</a> · area forecast, not a street-level sensor reading.</p>}
+        {forecast&&<p className="mt-2 text-xs">Weather: <a href="https://open-meteo.com/" target="_blank" rel="noreferrer" className="font-bold underline">Open-Meteo</a> · area forecast, not a street-level sensor reading. Route suggestions consider predicted sun intensity and rain risk.</p>}
         <button type="button" onClick={() => rainy && !night ? onInspectCover() : onCompare(night ? 'safest' : 'coolest')} className="mt-2 inline-flex min-h-11 items-center gap-2 font-bold text-emerald-900 underline">
             {night ? 'Compare lighting' : rainy ? 'Inspect cover records' : 'Compare sun exposure'}<ArrowUpRight size={18} aria-hidden />
         </button>

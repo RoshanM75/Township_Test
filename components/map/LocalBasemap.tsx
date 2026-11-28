@@ -3,17 +3,18 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMap } from 'react-leaflet';
 import L from 'leaflet';
 import type { DetailFeature, MapAppearance, MapProperties, TerrainDetail } from '@/lib/map-detail';
-import { featureDescription, labelColour, mapColors as C, pathColour, polygonColour, roadColour, roadWidth } from '@/lib/map-detail';
+import { featureDescription, infrastructureColour, labelColour, mapColors as C, pathColour, polygonColour, roadColour, roadWidth } from '@/lib/map-detail';
 import { PILOTS, isPilot, type PilotId } from '@/lib/pilots';
 import { residentText, type ResidentLanguage } from '@/lib/resident-language';
 import { sitePath } from '@/lib/site';
+import { mapLevelMatches,type MapLevel } from '@/lib/pedestrian-world';
 import type { SolarModel } from '@/lib/solar-shade';
 
 type Point=[number,number];
 type Rect=[number,number,number,number];
 type Prepared={props:MapProperties;paths:Point[][];bounds:Rect;polygon:boolean;point:boolean};
-type Options={appearance:MapAppearance;showTerrain:boolean;terrain:TerrainDetail|null;labelScale:number;language:ResidentLanguage;highContrast:boolean;inspect:boolean;solar?:SolarModel;shadeAt?:string};
-const order=['landuse','green','pitch','water','plaza','parking','deck','contour','watercourse','street','rail','path','boundary','building','tree','label'];
+type Options={appearance:MapAppearance;mapLevel:MapLevel;showPedestrianDetails:boolean;showTerrain:boolean;terrain:TerrainDetail|null;labelScale:number;language:ResidentLanguage;highContrast:boolean;inspect:boolean;solar?:SolarModel;shadeAt?:string};
+const order=['landuse','green','pitch','water','plaza','parking','deck','contour','watercourse','street','rail','path','boundary','building','vegetation','infrastructure','tree','label'];
 const areaKinds=new Set(['landuse','green','pitch','water','plaza','parking','deck']);
 const pointWorld=([lng,lat]:number[]):Point=>[(lng+180)/360*256,(1-Math.asinh(Math.tan(lat*Math.PI/180))/Math.PI)*128];
 const intersects=(a:Rect,b:Rect)=>a[0]<=b[2]&&a[2]>=b[0]&&a[1]<=b[3]&&a[3]>=b[1];
@@ -94,7 +95,10 @@ class DetailCanvas extends L.Layer {
         const zoom=map.getZoom(),scale=2**zoom,offset=map.containerPointToLayerPoint([0,0]),origin=map.getPixelOrigin().add(offset);
         const screen=([x,y]:Point):Point=>[x*scale-origin.x,y*scale-origin.y];
         const world:Rect=[(origin.x-70)/scale,(origin.y-70)/scale,(origin.x+size.x+70)/scale,(origin.y+size.y+70)/scale];
-        this.visible=this.features.filter(f=>intersects(f.bounds,world));
+        const options=this.detailOptions;
+        this.visible=this.features.filter(f=>intersects(f.bounds,world)&&
+            (f.props.kind!=='path'&&f.props.kind!=='infrastructure'||mapLevelMatches(options.mapLevel,f.props.levelGroup,f.props.level))&&
+            (options.showPedestrianDetails||!['infrastructure','vegetation'].includes(f.props.kind)));
         this.labels=[];L.DomUtil.setPosition(canvas,offset);ctx.setTransform(ratio,0,0,ratio,0,0);ctx.clearRect(0,0,size.x,size.y);
         ctx.save();
         if(this.area){
@@ -164,14 +168,22 @@ class DetailCanvas extends L.Layer {
                 ctx.restore();
             }
             for(const f of buildings){
+                ctx.globalAlpha=this.detailOptions.mapLevel==='below'||this.detailOptions.mapLevel.startsWith('floor:-')?.27:1;
                 trace(f);ctx.fillStyle=polygonColour(f.props);ctx.fill('evenodd');
                 if(zoom>=16){ctx.strokeStyle=f.props.use==='canopy'?'#819f93':C.buildingOutline;ctx.lineWidth=f.props.part?.65:.9;ctx.stroke();}
             }
+            ctx.globalAlpha=1;
         }
         // Outline mapped roofs/bridged pedestrian connections over building
         // footprints so a covered corridor is still visible on the flat map.
         if(zoom>=16.5)for(const f of lineFeatures.filter(f=>f.props.kind==='path'&&(f.props.covered||f.props.structure==='bridge'))){
             stroke(f,'#fffefa',3.35,[],.75);stroke(f,pathColour(f.props),1.6,f.props.restricted?[2,3]:[5,2],.9);
+        }
+        for(const f of this.visible.filter(f=>(f.props.kind==='infrastructure'||f.props.kind==='vegetation')&&zoom>=(['bridge','roof','underpass','tree'].includes(f.props.modelKind??'')?15.7:f.props.modelKind==='bench'?17.9:17.1))){
+            const colour=infrastructureColour(f.props);
+            if(f.polygon){ctx.globalAlpha=f.props.modelKind==='roof'?.62:f.props.kind==='vegetation'?.75:.88;fill(f);ctx.globalAlpha=1;if(zoom>=17)stroke(f,colour,.75);}
+            else if(f.point){const [x,y]=screen(f.paths[0][0]);ctx.beginPath();ctx.arc(x,y,4,0,Math.PI*2);ctx.fillStyle=colour;ctx.fill();ctx.strokeStyle='#fffefa';ctx.lineWidth=1.25;ctx.stroke();}
+            else stroke(f,colour,zoom>=18?2.8:1.8,f.props.modelKind==='tactile'?[1,2.5]:[4,2],.9);
         }
         if(zoom>=17)for(const f of this.visible.filter(f=>f.props.kind==='tree')){const [x,y]=screen(f.paths[0][0]);ctx.beginPath();ctx.arc(x,y,3,0,2*Math.PI);ctx.fillStyle='#86a982';ctx.fill();}
 
@@ -229,7 +241,9 @@ class DetailCanvas extends L.Layer {
         if(!props&&map.getZoom()>=16.5){
             const candidates=this.visible.filter(f=>intersects(f.bounds,[point[0]-tolerance,point[1]-tolerance,point[0]+tolerance,point[1]+tolerance]));
             const line=candidates.find(f=>f.props.kind==='path'&&f.paths.some(path=>lineDistance(point,path)<=tolerance));
-            props=line?.props??[...candidates].reverse().find(f=>f.polygon&&f.props.kind==='building'&&insidePolygon(point,f.paths))?.props;
+            const model=[...candidates].reverse().find(f=>['infrastructure','vegetation'].includes(f.props.kind)&&
+                (f.polygon?insidePolygon(point,f.paths):f.point?Math.hypot(f.paths[0][0][0]-point[0],f.paths[0][0][1]-point[1])<=tolerance:f.paths.some(path=>lineDistance(point,path)<=tolerance)));
+            props=model?.props??line?.props??[...candidates].reverse().find(f=>f.polygon&&f.props.kind==='building'&&insidePolygon(point,f.paths))?.props;
         }
         if(!props)return;
         const {title,lines}=featureDescription(props,this.detailOptions.language),panel=document.createElement('div'),heading=document.createElement('strong');
@@ -245,10 +259,10 @@ class DetailCanvas extends L.Layer {
 }
 
 const mapCache=new Map<string,DetailFeature[]>();
-export default function LocalBasemap({url,appearance,showTerrain,terrain,labelScale,language,highContrast,inspect,solar,shadeAt}:Options&{url:string}){
+export default function LocalBasemap({url,appearance,mapLevel,showPedestrianDetails,showTerrain,terrain,labelScale,language,highContrast,inspect,solar,shadeAt}:Options&{url:string}){
     const map=useMap();
     const [source,setSource]=useState<{url:string;features:DetailFeature[];failed:boolean}|null>(null);
-    const options=useMemo(()=>({appearance,showTerrain,terrain,labelScale,language,highContrast,inspect,solar,shadeAt}),[appearance,showTerrain,terrain,labelScale,language,highContrast,inspect,solar,shadeAt]);
+    const options=useMemo(()=>({appearance,mapLevel,showPedestrianDetails,showTerrain,terrain,labelScale,language,highContrast,inspect,solar,shadeAt}),[appearance,mapLevel,showPedestrianDetails,showTerrain,terrain,labelScale,language,highContrast,inspect,solar,shadeAt]);
     const area=useMemo(()=>{const id=url.match(/\/map-area\/([^/]+)\.geojson$/)?.[1];return isPilot(id)?id:undefined;},[url]);
     useEffect(()=>{
         if(mapCache.has(url))return;

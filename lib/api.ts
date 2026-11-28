@@ -4,7 +4,8 @@ import type { MaintenanceDefect } from './types';
 import type { Assignment, OperatorActivity, OperatorTarget, CoverageRow, Responsibility } from './operator';
 import type { WalkingData } from './walking';
 import type { CommunityDraft, CommunityRoute, RoutePoint } from './community-routes';
-import { IS_PAGES_PREVIEW, dataPath } from './site.ts';
+import { IS_PAGES_PREVIEW, dataPath, sitePath } from './site.ts';
+import { enrichWorldEdges, type PedestrianWorld } from './pedestrian-world.ts';
 import { weatherUrl, parseWeather, unavailableWeather, type WalkingWeather } from './comfort.ts';
 import { DEFAULT_ORIGIN } from './precinct.ts';
 import { PILOTS,type PilotId,type PilotContext } from './pilots.ts';
@@ -40,7 +41,22 @@ async function request<T>(url: string, options?: RequestInit,area?:PilotId): Pro
     return data as T;
 }
 
-export const loadGraph = (area?:PilotId) => request<GraphData>('/api/graph',undefined,area);
+const worldCache=new Map<PilotId,Promise<PedestrianWorld|null>>();
+export function loadPedestrianWorld(area:PilotId){
+    const current=worldCache.get(area);if(current)return current;
+    const pending=fetch(sitePath(`/map-area/${area}-world.json`),{signal:AbortSignal.timeout(5000)}).then(async response=>{
+        if(!response.ok)throw Error('Pedestrian model unavailable');
+        const world=await response.json() as PedestrianWorld;
+        if(world.version!==1||world.area!==area||!world.ways||!world.sources||!world.geometry)throw Error('Invalid pedestrian model');
+        return world;
+    }).catch(()=>{worldCache.delete(area);return null;});
+    worldCache.set(area,pending);return pending;
+}
+export async function loadGraph(area?:PilotId){
+    const [graph,preloaded]=await Promise.all([request<GraphData>('/api/graph',undefined,area),area?loadPedestrianWorld(area):Promise.resolve(null)]);
+    const world=area&&(!graph.source.area_id||graph.source.area_id===area)?preloaded:await loadPedestrianWorld(graph.source.area_id??area??'elmina');
+    return world?{...graph,edges:enrichWorldEdges(graph.edges,world,graph.source.dataset_id)}:graph;
+}
 export const loadPilotContext = (area:PilotId) => request<PilotContext>('/api/pilot-context',undefined,area);
 export const loadWalkingData = async (area?:PilotId) => {
     const data = await request<WalkingData>('/api/walking-data',undefined,area);

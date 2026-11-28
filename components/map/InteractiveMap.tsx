@@ -18,6 +18,7 @@ import type { ShadeStretch } from '@/lib/route-shade';
 import type { SolarModel } from '@/lib/solar-shade';
 import { shadeLabel } from '@/lib/shade-display';
 import LocalBasemap from './LocalBasemap';
+import type { MapLevel } from '@/lib/pedestrian-world';
 import type { MapAppearance, TerrainDetail } from '@/lib/map-detail';
 import { useMapTerrain } from './useMapTerrain';
 import { isPilot } from '@/lib/pilots';
@@ -79,6 +80,8 @@ export interface InteractiveMapProps {
     showLayerControls?: boolean;
     localBasemap?: string;
     mapAppearance?: MapAppearance;
+    mapLevel?: MapLevel;
+    showPedestrianDetails?:boolean;
     showTerrain?: boolean;
     showTerrainMesh?: boolean;
     terrainDetail?: TerrainDetail | null;
@@ -353,7 +356,7 @@ export default function InteractiveMap({
     informationLayer,
     conditionSegments, routeShade, describeAsset, onShadeReport, solar, shadeAt,
     showLayerControls = true,
-    localBasemap, mapAppearance = 'detailed', showTerrain = true, terrainDetail,
+    localBasemap, mapAppearance = 'detailed', showTerrain = true, terrainDetail, mapLevel='all',showPedestrianDetails=true,
     onInformationLayerChange,
     focusLocation,
     liveLocation,
@@ -469,7 +472,7 @@ export default function InteractiveMap({
                 renderer={renderer}
                 preferCanvas={Boolean(localBasemap)}
             >
-                {localBasemap && <Pane name="pilot-basemap" style={{ zIndex: mapAppearance==='street'?190:240 }}><LocalBasemap url={localBasemap} appearance={mapAppearance} showTerrain={showTerrain} terrain={terrain}
+                {localBasemap && <Pane name="pilot-basemap" style={{ zIndex: mapAppearance==='street'?190:240 }}><LocalBasemap url={localBasemap} appearance={mapAppearance} mapLevel={mapLevel} showPedestrianDetails={showPedestrianDetails} showTerrain={showTerrain} terrain={terrain}
                     labelScale={labelScale} language={language} highContrast={highContrast} inspect={!onLocationSelect&&!overview} solar={layer==='shade'?solar:undefined} shadeAt={shadeAt}/></Pane>}
                 <TileLayer
                     key={largeTiles ? 'large-labels' : 'regular-labels'}

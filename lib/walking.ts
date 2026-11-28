@@ -1,3 +1,4 @@
+import type { WalkingWeather } from './comfort.ts';
 import type { Mode, Profile, RouteResult } from './routing.ts';
 import type { RouteShade } from './route-shade.ts';
 import type { PilotId } from './pilots.ts';
@@ -77,6 +78,7 @@ export interface WalkingNeeds {
     avoid_uneven_surfaces: boolean;
     min_clear_width_m: number | null;
     require_tactile_crossings: boolean;
+    require_tactile_continuity: boolean;
     require_audible_crossings: boolean;
     verified_only: boolean;
     require_rests: boolean;
@@ -94,7 +96,7 @@ export const WALK_BUDGETS = [5, 10, 15, 20, 30, 45, 60, 90, 120] as const;
 export const DEFAULT_NEEDS: WalkingNeeds = {
     step_free: false, max_slope_pct: 8, avoid_uncontrolled_crossings: false,
     avoid_uneven_surfaces: false, rest_backrest: false, rest_armrests: false, rest_shelter: false,
-    min_clear_width_m: null, require_tactile_crossings: false, require_audible_crossings: false,
+    min_clear_width_m: null, require_tactile_crossings: false, require_tactile_continuity: false, require_audible_crossings: false,
     verified_only: false, require_rests: false, rest_interval_min: 5,
     rest_duration_min: 2, budget_min: 30, speed_mps: null,
 };
@@ -160,6 +162,7 @@ export interface PlanningInput {
     entrance_id?: string;
     start_asset_id?: string;
     initial_without_rest_min?: number;
+    weather?: WalkingWeather|null;
     profile: Profile;
     needs: WalkingNeeds;
     departure_at: string;

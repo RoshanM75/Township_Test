@@ -1,5 +1,5 @@
 import type { ExpressionSpecification, LayerSpecification, LineLayerSpecification, SymbolLayerSpecification } from 'maplibre-gl';
-import { mapColors as C, roadWidths } from '@/lib/map-detail';
+import { infrastructureColors, mapColors as C, roadWidths } from '@/lib/map-detail';
 
 const kind=(value:string):ExpressionSpecification=>['==',['get','kind'],value];
 const all=(...filters:ExpressionSpecification[]):ExpressionSpecification=>['all',...filters];
@@ -35,7 +35,12 @@ function rail(structure:'surface'|'bridge',id:string):LineLayerSpecification[]{
     ];
 }
 
-export const INSPECT_BASE_LAYERS=['district-labels','place-labels','local-landmark-labels','building-labels','business-labels','path-labels','street-labels','minor-street-labels','contour-labels','building-volumes','canopy-volumes','building-footprints','covered-paths','crossings','steps-paths','reference-paths','restricted-paths','streets','minor-streets','bridges','bridge-service','underground-streets','railways','bridge-railways','underground-railways'];
+const modelKind=get('modelKind');
+const infrastructure=all(kind('infrastructure'),['!=',['geometry-type'],'Point']);
+const modelColour:ExpressionSpecification=['match',modelKind,...Object.entries(infrastructureColors).flatMap(([k,v])=>[k,v]),'#64748b'] as ExpressionSpecification;
+export const PEDESTRIAN_DETAIL_LAYERS=['pedestrian-deck-footprints','pedestrian-decks','pedestrian-roofs','pedestrian-stairs-ramps','pedestrian-underground','pedestrian-tactile','pedestrian-step-lines','pedestrian-facilities','pedestrian-benches','vegetation-volumes'];
+export const LEVEL_PATH_LAYERS=['reference-paths','restricted-paths','crossings','steps-paths','cover-path-casing','covered-paths','path-labels',...PEDESTRIAN_DETAIL_LAYERS.filter(id=>id!=='vegetation-volumes')];
+export const INSPECT_BASE_LAYERS=[...PEDESTRIAN_DETAIL_LAYERS,'district-labels','place-labels','local-landmark-labels','building-labels','business-labels','path-labels','street-labels','minor-street-labels','contour-labels','building-volumes','canopy-volumes','building-footprints','covered-paths','crossings','steps-paths','reference-paths','restricted-paths','streets','minor-streets','bridges','bridge-service','underground-streets','railways','bridge-railways','underground-railways'];
 export const DETAIL_LABEL_LAYERS=['district-labels','place-labels','local-landmark-labels','building-labels','business-labels','path-labels','street-labels','minor-street-labels','contour-labels'] as const;
 export function labelSize(layer:typeof DETAIL_LABEL_LAYERS[number],scale:number):ExpressionSpecification|number{
     if(layer==='district-labels')return 14*scale;
@@ -99,6 +104,16 @@ export function detailBuildingLayers():LayerSpecification[]{
             'fill-extrusion-color':heightColor,'fill-extrusion-height':get('height'),'fill-extrusion-base':get('base'),'fill-extrusion-opacity':.94,'fill-extrusion-vertical-gradient':true}},
         {id:'canopy-volumes',type:'fill-extrusion',source:'area',minzoom:16,filter:all(kind('building'),equals('use','canopy'),['!=',get('volume'),false]),paint:{
             'fill-extrusion-color':C.canopy,'fill-extrusion-height':get('height'),'fill-extrusion-base':get('base'),'fill-extrusion-opacity':.8,'fill-extrusion-vertical-gradient':true}},
-        {id:'mapped-trees',type:'circle',source:'area',minzoom:17,filter:kind('tree'),paint:{'circle-radius':3,'circle-color':'#86a982','circle-stroke-color':'#769770','circle-stroke-width':1}},
+        {id:'pedestrian-deck-footprints',type:'fill',source:'area',minzoom:16,filter:all(infrastructure,['==',['geometry-type'],'Polygon'],['in',modelKind,['literal',['bridge','roof','ramp']]]),paint:{'fill-color':modelColour,'fill-opacity':.28}},
+        {id:'pedestrian-decks',type:'fill-extrusion',source:'area',minzoom:15.8,filter:all(kind('infrastructure'),equals('modelKind','bridge'),['has','height']),paint:{'fill-extrusion-color':modelColour,'fill-extrusion-base':get('base'),'fill-extrusion-height':get('height'),'fill-extrusion-opacity':.92}},
+        {id:'pedestrian-stairs-ramps',type:'fill-extrusion',source:'area',minzoom:17.4,filter:all(kind('infrastructure'),['in',modelKind,['literal',['stairs','ramp']]],['has','height']),paint:{'fill-extrusion-color':modelColour,'fill-extrusion-base':get('base'),'fill-extrusion-height':get('height'),'fill-extrusion-opacity':.95}},
+        {id:'pedestrian-roofs',type:'fill-extrusion',source:'area',minzoom:16,filter:all(kind('infrastructure'),equals('modelKind','roof'),['has','height']),paint:{'fill-extrusion-color':modelColour,'fill-extrusion-base':get('base'),'fill-extrusion-height':get('height'),'fill-extrusion-opacity':.76}},
+        {id:'pedestrian-benches',type:'fill-extrusion',source:'area',minzoom:18.3,filter:all(kind('infrastructure'),equals('modelKind','bench')),paint:{'fill-extrusion-color':modelColour,'fill-extrusion-base':get('base'),'fill-extrusion-height':get('height'),'fill-extrusion-opacity':1}},
+        {id:'vegetation-volumes',type:'fill-extrusion',source:'area',minzoom:15.5,filter:kind('vegetation'),paint:{'fill-extrusion-color':modelColour,'fill-extrusion-base':get('base'),'fill-extrusion-height':get('height'),'fill-extrusion-opacity':.82}},
+        {id:'pedestrian-underground',type:'line',source:'area',minzoom:15.5,filter:all(kind('infrastructure'),equals('modelKind','underpass')),paint:{'line-color':modelColour,'line-width':2.4,'line-dasharray':[2.5,1.8],'line-opacity':.8}},
+        {id:'pedestrian-tactile',type:'line',source:'area',minzoom:17.2,filter:all(kind('infrastructure'),equals('modelKind','tactile'),['==',['geometry-type'],'LineString']),paint:{'line-color':modelColour,'line-width':2.6,'line-dasharray':[.6,1.3]}},
+        {id:'pedestrian-step-lines',type:'line',source:'area',minzoom:17.2,filter:all(kind('infrastructure'),equals('modelKind','stairs'),['==',['geometry-type'],'LineString']),paint:{'line-color':modelColour,'line-width':2.8,'line-dasharray':[1.1,1.1]}},
+        {id:'pedestrian-facilities',type:'circle',source:'area',minzoom:17.4,filter:all(kind('infrastructure'),['==',['geometry-type'],'Point']),paint:{'circle-color':modelColour,'circle-radius':4.2,'circle-stroke-color':'#fffefa','circle-stroke-width':1.2}},
+        {id:'mapped-trees' ,type:'circle',source:'area',minzoom:17,filter:kind('tree'),paint:{'circle-radius':3,'circle-color':'#86a982','circle-stroke-color':'#769770','circle-stroke-width':1}},
     ];
 }

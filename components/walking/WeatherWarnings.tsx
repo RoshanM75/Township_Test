@@ -17,6 +17,7 @@ export default function WeatherWarningList({ feed, now }: { feed: WeatherWarning
         {(!feed || feed.status === 'unavailable' || !active.length) && <p className="text-xs text-slate-600" role="status">
             {!feed ? 'Checking MET Malaysia warnings…' : feed.status === 'unavailable' ? 'Warning feed unavailable.' : 'No active warnings returned by the feed.'}
         </p>}
+        {!!nearby.length&&<p className="mt-2 font-semibold text-amber-950">Consider delaying this walk and follow the official advice. A covered path is not necessarily safe during a storm.</p>}
         {nearby.map(warning => <article key={warning.id} className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-2">
             <h4 className="font-bold">{warning.title}</h4>
             <p>{warning.description}</p>

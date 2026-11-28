@@ -1,18 +1,19 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Pause, Play, LocateFixed, Flag, Navigation, Route } from 'lucide-react';
+import { Pause, Play, LocateFixed, Flag, Navigation, Route, Volume2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { addTrackFix } from '@/lib/walk-tracking';
 import { destinationForVisit } from '@/lib/profile-activity';
 import { DRAFT_KEY, type WalkSession, type CompletedWalk, type WalkFeedback as Feedback } from '@/lib/walk-library';
 import { residentText, type ResidentLanguage, type ResidentLabel } from '@/lib/resident-language';
 import { residentPlaceName, routeStepAt } from '@/lib/resident-walking';
 import WalkFeedback from './WalkFeedback';
+import { pedestrianCue } from '@/lib/pedestrian-guidance';
 
-export default function WalkRecorder({ session, onComplete, onFeedback, onPosition, onNewWalk, onShareShortcut, language, voiceEnabled = false, panelControl, children }: { session: WalkSession;
+export default function WalkRecorder({ session, onComplete, onFeedback, onPosition, onNewWalk, onShareShortcut, language, voiceEnabled = false, vibrationEnabled=false, panelControl, children }: { session: WalkSession;
     onComplete: (walk: CompletedWalk) => boolean; onFeedback: (id: string, feedback: Feedback) => boolean;
     onPosition: (point: [number, number]) => void; onNewWalk: () => void;
-    onShareShortcut?: (walk: CompletedWalk) => void; language: ResidentLanguage; voiceEnabled?: boolean; panelControl: ReactNode; children?: ReactNode }) {
+    onShareShortcut?: (walk: CompletedWalk) => void; language: ResidentLanguage; voiceEnabled?: boolean; vibrationEnabled?:boolean; panelControl: ReactNode; children?: ReactNode }) {
     const t = (label: ResidentLabel) => residentText(language, label);
     const [paused, setPaused] = useState(!!session.restored), [gps, setGps] = useState(false);
     const [base, setBase] = useState(session.elapsed_ms), [started, setStarted] = useState(Date.now), [clock, setClock] = useState(Date.now);
@@ -24,6 +25,7 @@ export default function WalkRecorder({ session, onComplete, onFeedback, onPositi
     const lastSave = useRef(0);
     const progress = useRef(0);
     const [guidance, setGuidance] = useState<{ index: number; onRoute: boolean }>();
+    const [manualIndex,setManualIndex]=useState(0);
     const elapsed = base + (paused ? 0 : Math.max(0, clock - started));
     function clearDraft() { try { localStorage.removeItem(DRAFT_KEY); } catch { /* Completed history is already saved. */ } }
     function pause(reason = 'Paused. Resume when you are ready.') {
@@ -70,7 +72,7 @@ export default function WalkRecorder({ session, onComplete, onFeedback, onPositi
     }, [gps, paused, completed, onPosition, session.pack.route]);
     const lastSpoken = useRef<string | null>(null);
     useEffect(() => {
-        if (!voiceEnabled || !gps || paused || completed || !guidance || !('speechSynthesis' in window)) {
+        if ((!voiceEnabled&&!vibrationEnabled) || !gps || paused || completed || !guidance) {
             lastSpoken.current = null;
             return;
         }
@@ -78,17 +80,14 @@ export default function WalkRecorder({ session, onComplete, onFeedback, onPositi
         if (lastSpoken.current === key) return;
         lastSpoken.current = key;
         const step = session.pack.route.steps?.[guidance.index];
-        const crossing = session.pack.edges.some(edge => edge.id === step?.edge_id && edge.is_crossing);
-        const named = step && !/^Footpath \d+$/i.test(step.name) ? step.name : null;
-        const message = !guidance.onRoute ? residentText(language, 'Check your position on the map')
-            : crossing ? [residentText(language, 'Crossings'), named].filter(Boolean).join('. ')
-            : named ?? residentText(language, 'Follow the mapped route');
-        const utterance = new SpeechSynthesisUtterance(message);
-        utterance.lang = language === 'ms' ? 'ms-MY' : 'en-MY';
-        utterance.rate = .9;
-        window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(utterance);
-    }, [voiceEnabled, gps, paused, completed, guidance, language, session.pack]);
+        const edge=session.pack.edges.find(edge=>edge.id===step?.edge_id);
+        const cue=pedestrianCue(step,edge,session.pack.checks,new Date().toISOString(),language);
+        const message = !guidance.onRoute ? residentText(language, 'Check your position on the map') : `${cue.heading}. ${cue.detail}`;
+        if(vibrationEnabled&&typeof navigator.vibrate==='function')navigator.vibrate(!guidance.onRoute||cue.attention?[120,100,120]:60);
+        if(voiceEnabled&&'speechSynthesis' in window){const utterance = new SpeechSynthesisUtterance(message);
+            utterance.lang = language === 'ms' ? 'ms-MY' : 'en-MY';utterance.rate = .9;
+            window.speechSynthesis.cancel();window.speechSynthesis.speak(utterance);}
+    }, [voiceEnabled,vibrationEnabled, gps, paused, completed, guidance, language, session.pack]);
     function finish() {
         const active = base + (paused ? 0 : Math.max(0, Date.now() - started));
         const result: CompletedWalk = { id: session.id, title: session.pack.title, started_at: session.started_at, finished_at: new Date().toISOString(),
@@ -108,12 +107,14 @@ export default function WalkRecorder({ session, onComplete, onFeedback, onPositi
             <button className="tg-btn" onClick={onNewWalk}>{t('Plan another walk')}</button>
         </>}
     </div>;
-    const stepIndex = guidance?.index ?? 0;
-    const current = session.pack.route.steps?.[stepIndex];
-    const crossing = session.pack.edges.some(edge => edge.id === current?.edge_id && edge.is_crossing);
-    const namedStep = current && !/^Footpath \d+$/i.test(current.name) ? current.name : null;
-    const cue = paused ? t('Walk paused') : gps && guidance?.onRoute === false ? t('Check your position on the map')
-        : crossing ? [t('Crossings'), namedStep].filter(Boolean).join(' · ') : namedStep ?? t('Follow the mapped route');
+    const steps=session.pack.route.steps??[];
+    const stepIndex = guidance?.index ?? manualIndex;
+    const current = steps[stepIndex];
+    const edge=session.pack.edges.find(edge=>edge.id===current?.edge_id);
+    const stepCue=pedestrianCue(current,edge,session.pack.checks,new Date(clock).toISOString(),language);
+    const cue = paused ? t('Walk paused') : gps && guidance?.onRoute === false ? t('Check your position on the map') : stepCue.heading;
+    const manualStep=steps[Math.min(manualIndex,Math.max(0,steps.length-1))];
+    const manualCue=pedestrianCue(manualStep,session.pack.edges.find(e=>e.id===manualStep?.edge_id),session.pack.checks,new Date(clock).toISOString(),language);
     return <>
         <div className="tg-walk-summary">
             <div className="tg-walk-cue">
@@ -136,6 +137,15 @@ export default function WalkRecorder({ session, onComplete, onFeedback, onPositi
                 else if (!navigator.geolocation) setMessage('This browser cannot record GPS. The timer is still available.');
                 else setGps(true);
             }}><LocateFixed size={20} aria-hidden />{t(gps ? 'Stop GPS recording' : 'Record GPS on this device')}</button>
+            {!!steps.length&&<details className="tg-details">
+                <summary>{t('Step-by-step guidance')}</summary>
+                <div className="tg-stack mt-3">
+                    <p className="tg-small">{t('Review the steps in order. GPS cannot identify floors or tell you when it is safe to cross.')}</p>
+                    <div className="tg-note" aria-live="polite"><p className="tg-small">{t('Manual route review')} · {Math.min(manualIndex+1,steps.length)}/{steps.length}</p><strong>{manualCue.heading}</strong><p className="tg-small">{manualCue.detail}</p></div>
+                    <div className="grid grid-cols-2 gap-2"><button className="tg-btn" disabled={manualIndex<=0} type="button" onClick={()=>setManualIndex(i=>Math.max(0,i-1))}><ChevronLeft size={18} aria-hidden/>{t('Previous step')}</button><button className="tg-btn" type="button" disabled={manualIndex>=steps.length-1} onClick={()=>setManualIndex(i=>Math.min(steps.length-1,i+1))}>{t('Next step')}<ChevronRight size={18} aria-hidden/></button></div>
+                    {typeof window!=='undefined'&&'speechSynthesis' in window&&<button className="tg-btn" type="button" onClick={()=>{const u=new SpeechSynthesisUtterance(`${manualCue.heading}. ${manualCue.detail}`);u.lang=language==='ms'?'ms-MY':'en-MY';u.rate=.9;window.speechSynthesis.cancel();window.speechSynthesis.speak(u);}}><Volume2 size={18} aria-hidden/>{t('Read this step')}</button>}
+                </div>
+            </details>}
             {confirm ? <div className="tg-note tg-stack">
                 <p>{t('Save finished walk')}</p>
                 {visitDestination && <label className="tg-visit-confirm">

@@ -211,3 +211,16 @@
     .resident-map .leaflet-control-attribution { font-size:9.5px; }
 }
 .tg-map-data-source { font-size:.71rem;line-height:1.3;color:var(--brand-ink,#692038);text-decoration:underline;text-underline-offset:2px; }
+.tg-pedestrian-settings { display:grid;gap:.25rem; }
+.tg-pedestrian-settings .tg-map-level-label {min-height:auto;font-size:.82rem;}
+.tg-pedestrian-settings select { width:100%;min-height:2.75rem; }
+.tg-map-detail-key i[data-kind=bridge] { border-top:3px solid #798d99; }
+.tg-map-detail-key i[data-kind=underpass] { border-top:2px dashed #796792; }
+.tg-map-detail-key i[data-kind=tactile] { border-top:3px dotted #b48a28; }
+.tg-map-world-data a { display:block;overflow-wrap:anywhere;padding:.2rem 0; }
+.tg-map-world-data .tg-map-download { min-height:2.4rem;display:flex;align-items:center; }
+.tg-level-status button { font-weight:700;text-decoration:underline;padding:.15rem; }
+.tg-map-source-credits {position:absolute;bottom:1.5rem;right:.5rem;z-index:500;max-width:75%;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:.15rem;background:#fffdf5e8;font-size:9px;padding:.15rem .3rem;border-radius:.3rem;}
+
+/* Keep scrollable Layer controls above sibling map buttons while open. */
+.tg-map-controls:has(.tg-map-settings[open]) { z-index:1155; }

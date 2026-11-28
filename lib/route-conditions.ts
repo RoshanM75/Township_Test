@@ -16,6 +16,7 @@ export interface RouteBarrier {
 export const CONDITION_LABELS: Record<string, string> = {
     path_open: 'Path passability', has_steps: 'Steps', slope_pct: 'Slope', surface_rating: 'Surface',
     has_kerb_ramp: 'Kerb ramps', clear_width_m: 'Clear width', crossing_type: 'Crossing type',
+    tactile_continuous:'Continuous tactile guidance',level_connection_checked:'Physical level connection',deck_height_m:'Deck height above local ground',step_count:'Step count',kerb_height_m:'Kerb height',
     has_tactile: 'Tactile paving', audible_signal: 'Audible signal', lit_ratio: 'Lighting',
     covered: 'Roof cover', shade_morning: 'Morning shade', shade_midday: 'Midday shade', shade_afternoon: 'Afternoon shade',
     available: 'Availability', path_connection: 'Path connection', step_free: 'Step-free access', lift_available: 'Lift availability',
@@ -38,7 +39,14 @@ export function observedEdge(edge: PathEdge, records: WalkingData['verifications
     const evidence = evidenceFor(records, edge.is_crossing ? 'crossing' : 'path', edge.id, at);
     const values = Object.fromEntries(Object.entries(evidence).map(([key, v]) => [key, v.value]));
     const result = { ...edge, ...values } as PathEdge;
+    if(evidence.opening_hours&&typeof evidence.opening_hours.value==='string')result.path_opening_hours=evidence.opening_hours.value;
+    if(evidence.deck_height_m?.status==='verified'&&typeof evidence.deck_height_m.value==='number'&&edge.world)result.world={...edge.world,elevationM:evidence.deck_height_m.value};
     if (evidence.covered && evidence.covered.status !== 'verified') result.covered = null;
+    if(edge.covered===true&&result.covered!==true){
+        // A correction must not retain the old full-cover shade assumption.
+        for(const field of ['shade_morning','shade_midday','shade_afternoon'] as const)result[field]=evidence[field]?.status==='verified'&&typeof evidence[field].value==='number'?evidence[field].value:null;
+        result.shade_source=['shade_morning','shade_midday','shade_afternoon'].some(f=>evidence[f]?.status==='verified')?'audited':null;
+    }
     const shade = `shade_${slotForHour(malaysiaHour(at))}`;
     if (isConfirmed(evidence, shade)) result.shade_source = 'audited';
     if (isConfirmed(evidence, 'lit_ratio')) result.lighting_source = 'audited';
@@ -54,6 +62,8 @@ type Requirements = Pick<PlanningInput, 'profile' | 'needs' | 'departure_at'>;
 export function requiredEdgeFields(edge: PathEdge, input: Requirements, mode: Mode, at = input.departure_at, records: WalkingData['verifications'] = []) {
     const e = evidenceFor(records, edge.is_crossing ? 'crossing' : 'path', edge.id, at);
     const needed = ['path_open', 'surface_rating', 'slope_pct'];
+    if(input.needs.require_tactile_continuity)needed.push('tactile_continuous');
+    if(edge.world&&(edge.world.levels.length>1||['stairs','ramp','lift','bridge','underpass'].includes(edge.world.connector??'')))needed.push('level_connection_checked');
     if (input.needs.min_clear_width_m !== null) needed.push('clear_width_m');
     if (input.needs.step_free || requiresStepFreeProfile(input.profile)) needed.push('has_steps');
     if (edge.is_crossing) {
@@ -72,7 +82,7 @@ export function requiredEdgeFields(edge: PathEdge, input: Requirements, mode: Mo
 export function arrivalFields(asset: WalkingAsset, input: Requirements, liftRecorded = false) {
     if (['community_path_endpoint','errand_return_endpoint'].includes(String(asset.properties.connection_model))) return [];
     const stepFree = input.needs.step_free || requiresStepFreeProfile(input.profile);
-    return ['available', 'path_connection', 'opening_hours', ...(stepFree ? ['step_free'] : []),
+    return ['available', 'path_connection', 'opening_hours', ...(input.needs.require_tactile_continuity?['tactile_continuous']:[]), ...(stepFree ? ['step_free'] : []),
         ...(stepFree && liftRecorded ? ['lift_available'] : []),
         ...(asset.kind === 'rest' ? [input.profile === 'wheelchair' ? 'wheelchair_space' : 'has_seat'] : []),
         ...(asset.kind === 'water' ? ['water_available'] : []), ...(asset.kind === 'shelter' ? ['sheltered'] : []),
@@ -83,6 +93,7 @@ export function usableAccess(asset: WalkingAsset, facts: ReturnType<typeof asset
     const { needs } = input;
     const stepFree = needs.step_free || requiresStepFreeProfile(input.profile);
     if (['private', 'permission'].includes(String(values.public_access))) return false;
+    if(needs.require_tactile_continuity&&(evidence.tactile_continuous?.status!=='verified'||values.tactile_continuous!==true))return false;
     if (stepFree && (values.step_free === false || values.lift_available === false)) return false;
     if (needs.min_clear_width_m !== null && typeof values.clear_width_m === 'number' && values.clear_width_m < needs.min_clear_width_m) return false;
     return !arrivalFields(asset, input, !!evidence.lift_available).some(f => f !== 'opening_hours' && values[f] === false);
@@ -99,6 +110,10 @@ export function edgeRestrictions(edge: PathEdge, input: Requirements, records: W
     };
     const reportState = (h: HazardReport) => h.status === 'verified' ? 'checked' as const : 'reported' as const;
     if (facts.path_open?.value === false) add('path_open', 'Path recorded as closed or blocked');
+    if(facts.level_connection_checked?.value===false)add('level_connection_checked','Level connection recorded as unavailable');
+    if(needs.require_tactile_continuity&&(facts.tactile_continuous?.status!=='verified'||facts.tactile_continuous.value!==true))add('tactile_continuous','A current check of continuous tactile guidance is required');
+    if(edge.world?.restricted)add('path_open','Mapped access restriction','mapped');
+    if(openingAt(facts.opening_hours?.value??edge.world?.openingHours,input.departure_at)===false)add('opening_hours','Mapped passage is closed at departure','mapped');
     if (stepFree && edge.has_steps) add('has_steps', 'Steps conflict with step-free access');
     if (stepFree && edge.is_crossing && edge.has_kerb_ramp === false) add('has_kerb_ramp', 'Kerb ramp recorded as missing');
     if (needs.min_clear_width_m !== null && (typeof edge.clear_width_m !== 'number' || edge.clear_width_m < needs.min_clear_width_m || facts.clear_width_m?.status === 'stale'))

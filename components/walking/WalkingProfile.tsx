@@ -61,6 +61,7 @@ function accessLabels(settings: WalkingSettings, t: Translate) {
         ...(needs.min_clear_width_m !== null ? [`${t('Minimum clear path width')}: ${needs.min_clear_width_m} m`] : []),
         ...(needs.avoid_uncontrolled_crossings ? [t('Use controlled or marked crossings')] : []),
         ...(needs.require_tactile_crossings ? [t('Require tactile paving at crossings')] : []),
+        ...(needs.require_tactile_continuity ? [t('Require checked continuous tactile guidance')] : []),
         ...(needs.require_audible_crossings ? [t('Require audible pedestrian signals at crossings')] : []),
         ...(needs.verified_only ? [t('Require current checks for critical conditions')] : []),
     ];

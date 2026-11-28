@@ -15,6 +15,8 @@ export interface MapProperties {
     part?:boolean; volume?:boolean; levels?:number; roofShape?:string;
     road?:string; roadClass?:string; pathType?:string; structure?:string; restricted?:boolean; covered?:boolean;
     level?:string; surface?:string; landcover?:string; sport?:string; railway?:string; waterway?:string; barrier?:string;
+    modelKind?:string;modelLabel?:string;levelGroup?:string;dimensionSource?:string;visualOnly?:boolean;width?:number;stepCount?:number;slope?:number;kerbHeight?:number;
+    source?:string;sourceDate?:string;sourceRef?:string;
     labelKind?:string; priority?:number; minZoom?:number; elevation?:number; major?:boolean;
 }
 export type DetailFeature = Feature<Geometry,MapProperties>;
@@ -32,8 +34,11 @@ export const mapColors={
     underground:'#96969e', boundary:'#a29e92', label:'#48443f', station:'#275f79', place:'#4e4356', health:'#875368', food:'#865d31', shop:'#7d5148',
 } as const;
 
+export const infrastructureColors:Record<string,string>={roof:'#6da998',bridge:'#798d99',underpass:'#796792',stairs:'#8e729e',ramp:'#558c9f',tactile:'#b48a28',kerb:'#c18b53',lift:'#42667e',bench:'#87644a',signal:'#487a68',tree:'#739d70',shelter:'#398d7a',toilet:'#657cb1',water:'#4c91b9',entrance:'#8d6c4d'};
+export function infrastructureColour(p:MapProperties){return infrastructureColors[p.modelKind??'']??'#64748b';}
 export function polygonColour(p:MapProperties){
     switch(p.kind){
+        case 'infrastructure':case 'vegetation':return infrastructureColour(p);
         case 'green':return p.landcover==='wood'?mapColors.wood:p.landcover==='grass'?mapColors.grass:mapColors.green;
         case 'landuse':return p.landcover==='institutional'?mapColors.institutional:['commercial','retail'].includes(p.landcover??'')?mapColors.commercialLand:p.landcover==='construction'?mapColors.construction:mapColors.landuse;
         case 'water':return mapColors.water;
@@ -64,14 +69,27 @@ export function labelColour(p:MapProperties){
 }
 export function featureDescription(p:MapProperties,language:ResidentLanguage):{title:string;lines:string[]}{
     const t=(label:Parameters<typeof residentText>[1])=>residentText(language,label);
-    const title=p.name||t(p.kind==='building'?(p.use==='canopy'?'Mapped roof or canopy':p.part?'Mapped building section':'Mapped building'):p.kind==='path'?(p.pathType==='steps'?'Mapped steps':p.pathType==='crossing'?'Mapped crossing':p.covered?'Mapped covered path':'Mapped footpath'):p.kind==='street'?'Mapped street':p.kind==='contour'?'Estimated elevation':p.kind==='rail'?'Mapped railway':'Mapped place');
+    const labels:Record<string,Parameters<typeof residentText>[1]>={roof:'Mapped covered walkway',bridge:'Mapped pedestrian bridge',underpass:'Mapped underpass',stairs:'Mapped steps',ramp:'Mapped ramp',tactile:'Mapped tactile paving',kerb:'Mapped kerb',lift:'Mapped lift location',bench:'Mapped bench',signal:'Mapped accessible signal',tree:'Estimated canopy surface',shelter:'Mapped shelter',toilet:'Mapped toilet',water:'Mapped drinking water',entrance:'Mapped entrance'};
+    const title=p.name||(p.modelKind?t(labels[p.modelKind]??'Mapped place'):t(p.kind==='building'?(p.use==='canopy'?'Mapped roof or canopy':p.part?'Mapped building section':'Mapped building'):p.kind==='path'?(p.pathType==='steps'?'Mapped steps':p.pathType==='crossing'?'Mapped crossing':p.covered?'Mapped covered path':'Mapped footpath'):p.kind==='street'?'Mapped street':p.kind==='contour'?'Estimated elevation':p.kind==='rail'?'Mapped railway':'Mapped place'));
     const lines:string[]=[];
     if(p.kind==='building'){
-        if(p.heightSource==='height')lines.push(`${t('Recorded height')} ${p.height} m`);
+        if(p.heightSource==='height'||p.heightSource==='survey')lines.push(`${t('Recorded height')} ${p.height} m`);
         else if(p.heightSource==='levels')lines.push(`${t('Estimated height')} ${p.height} m${p.levels?` · ${p.levels} ${t('mapped floors')}`:''}`);
+        else if(p.heightSource==='satellite'||p.heightSource==='overture-height')lines.push(`${t('Estimated height')} ${p.height} m`);
         else lines.push(t('Height unknown; simplified 3D shape.'));
         if(p.roofShape)lines.push(`${t('Mapped roof shape')}: ${p.roofShape}`);
         if(p.volume===false)lines.push(t('Building outline; mapped sections shown separately.'));
+    }
+    if(p.kind==='infrastructure'||p.kind==='vegetation'){
+        if(p.modelKind)lines.push(t(labels[p.modelKind]??'Mapped place'));
+        if(p.visualOnly)lines.push(t('Schematic model — dimensions and connections need checking.'));
+        if(p.width!==undefined&&p.dimensionSource?.startsWith('mapped'))lines.push(`${t('Mapped width')}: ${p.width} m`);
+        if(p.stepCount!==undefined)lines.push(`${p.stepCount} ${t('mapped steps')}`);
+        if(p.slope!==undefined)lines.push(`${t('Mapped incline')}: ${p.slope}%`);
+        if(p.modelKind==='tactile')lines.push(t('Tactile continuity and condition are not confirmed.'));
+        if(p.restricted)lines.push(t('Restricted access; map context only.'));
+        if(p.kind==='vegetation'&&p.height!==undefined)lines.push(`${t('Estimated height')} ${p.height} m`);
+        if(p.level)lines.push(`${t('Mapped level')}: ${p.level}`);
     }
     if(p.kind==='path'){
         if(p.pathType==='steps')lines.push(t('Mapped steps'));
@@ -84,6 +102,7 @@ export function featureDescription(p:MapProperties,language:ResidentLanguage):{t
     if(p.structure==='bridge')lines.push(t('Bridge or elevated connection'));
     if(p.structure==='tunnel')lines.push(t('Underground connection'));
     if(p.kind==='contour')lines.push(`${p.elevation} m · ${t('Approximate terrain, not a footpath slope measurement.')}`);
-    else lines.push(t('OpenStreetMap · access needs field checking.'));
+    else if(p.source&&p.source!=='OpenStreetMap')lines.push(`${p.source}${p.sourceDate?' · '+p.sourceDate:''} · ${t('Estimated model; not a field check.')}`);
+    else lines.push(`${t('OpenStreetMap · access needs field checking.')}${p.sourceDate?' · '+p.sourceDate:''}`);
     return {title,lines};
 }
