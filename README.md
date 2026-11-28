@@ -10,6 +10,8 @@ The two KL pilots include dated Rapid KL timetable stops, additional access and 
 
 The resident map opens in 3D with named streets and landmarks. Choose **2D map** in the map view menu for the OpenStreetMap street style. Use **From** to pick a mapped starting point or your location, then search for a destination. On a phone, tap or drag the panel handle to expand the tools and bring back the map. The rain-shelter option favours mapped roof cover on routes where that data is available. The weather cards show current temperature and the next five hourly rain forecasts from [Open-Meteo](https://open-meteo.com/en/docs).
 
+The shared [pedestrian world model](docs/pedestrian-digital-twin.md) procedurally renders mapped walking infrastructure in both map modes, offers level selection, uses the same source-qualified shapes for shadow estimates, and exports real-world survey gaps. The operator can simulate proposed pedestrian links, roof covers, trees and rest locations. See the source status and optional free Overture/Google/Meta-WRI import commands in that guide. The normal app does not require external GIS downloads at runtime.
+
 The public GitHub Pages site is an **interactive preview** of the walking planner, built from the included OSM snapshot. Map combines place search, nearby facilities and route planning. Walk appears when you start a route, and Saved holds walk history and offline packs. Reports and shortcut drafts are saved on the device in the preview. The full server version handles shared maintenance reports and shortcut review. [Public preview](https://roshanm75.github.io/Township_Test/) [Everyday walking tools](docs/everyday-walking-tools.md)
 
 To build and test the public version without a database:

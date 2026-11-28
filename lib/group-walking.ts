@@ -20,6 +20,7 @@ export function groupWalkingSettings(members: WalkingSettings[]): WalkingSetting
         avoid_uncontrolled_crossings: needs.some(n => n.avoid_uncontrolled_crossings),
         avoid_uneven_surfaces: needs.some(n => n.avoid_uneven_surfaces),
         require_tactile_crossings: needs.some(n => n.require_tactile_crossings),
+        require_tactile_continuity: needs.some(n => n.require_tactile_continuity),
         require_audible_crossings: needs.some(n => n.require_audible_crossings),
         verified_only: needs.some(n => n.verified_only),
         require_rests: rests.length > 0,

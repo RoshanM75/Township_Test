@@ -17,7 +17,7 @@ function conditionLabel(field: string, value: unknown) {
     const surfaces: Record<number, string> = { 1: 'Good', 2: 'Uneven', 3: 'Broken' };
     const names: Record<string, string> = { path_open: 'Path open', has_steps: 'Steps present', covered: 'Roof cover',
         slope_pct: 'Slope', surface_rating: 'Surface', has_kerb_ramp: 'Kerb ramps', has_refuge: 'Crossing refuge',
-        clear_width_m: 'Clear width', has_tactile: 'Tactile paving', audible_signal: 'Audible signal',
+        clear_width_m: 'Clear width', has_tactile: 'Tactile paving', tactile_continuous: 'Continuous tactile guidance', level_connection_checked: 'Checked level connection', deck_height_m: 'Measured deck height', opening_hours:'Passage access hours', audible_signal: 'Audible signal',
         crossing_type: 'Crossing type', crossing_width_m: 'Crossing width', ped_green_s: 'Pedestrian green time',
         shade_morning: 'Morning shade', shade_midday: 'Midday shade', shade_afternoon: 'Afternoon shade', lit_ratio: 'Lit portion' };
     const text = typeof value === 'boolean' ? (value ? 'Yes' : 'No')

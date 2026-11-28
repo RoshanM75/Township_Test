@@ -1,5 +1,6 @@
 import { metres, pointAt, sliceLine } from './walking-geometry.ts';
 import type { PathEdge, PathNode } from './routing.ts';
+import { separateExplicitLevels } from './pedestrian-world.ts';
 
 export interface PathAnchor {
     key: string;
@@ -9,6 +10,7 @@ export interface PathAnchor {
 
 /** Split edges at points on the network while retaining segment evidence and direction. */
 export function splitPathAnchors(nodes: PathNode[], edges: PathEdge[], anchors: PathAnchor[]) {
+    ({nodes,edges}=separateExplicitLevels(nodes,edges));
     const byEdge = new Map<number, PathAnchor[]>();
     for (const anchor of anchors) {
         const list = byEdge.get(anchor.edge_id) ?? [];
@@ -16,7 +18,7 @@ export function splitPathAnchors(nodes: PathNode[], edges: PathEdge[], anchors: 
         byEdge.set(anchor.edge_id, list);
     }
     const splitNodes = [...nodes], splitEdges: PathEdge[] = [], anchorNodes = new Map<string, number>();
-    let nextNode = -1, nextEdge = -1;
+    let nextNode = nodes.reduce((n,v)=>Math.min(n,v.id-1),-1), nextEdge = -1;
     for (const edge of edges) {
         const points = byEdge.get(edge.id) ?? [];
         const fractions = [...new Set([0, 1, ...points.map(point => point.fraction)])].sort((a, b) => a - b);

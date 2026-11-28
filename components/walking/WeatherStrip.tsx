@@ -25,6 +25,7 @@ export default function WeatherStrip({ weather, now }: { weather: WalkingWeather
                         <span><Thermometer size={14} aria-hidden /> Now</span>
                         <strong>{degrees(weather.air_temp_c)}</strong>
                         <small>{weather.feels_like_c === null ? 'Feels like unavailable' : `Feels like ${degrees(weather.feels_like_c)}`}</small>
+                        {weather.humidity!=null&&<small>{Math.round(weather.humidity)}% humidity</small>}
                     </li>
                     {hours.map(hour => (
                         <li key={hour.time} className={`tg-weather-card${(hour.rain_probability ?? 0) >= 50 ? ' tg-weather-rain' : ''}`}>

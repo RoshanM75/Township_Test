@@ -8,7 +8,13 @@ const PATH_FIELDS: ObservationField[] = [
     { key: 'clear_width_m', label: 'Narrowest clear path width (metres)', kind: 'number', min: .1, max: 30 },
     { key: 'crossing_type', label: 'Crossing type', kind: 'choice', options: ['signalised', 'zebra', 'uncontrolled'], crossingOnly: true },
     { key: 'has_kerb_ramp', label: 'Kerb ramps are present', kind: 'boolean', crossingOnly: true },
-    { key: 'has_tactile', label: 'Tactile paving is present', kind: 'boolean', crossingOnly: true },
+    { key: 'has_tactile', label: 'Tactile paving is present', kind: 'boolean' },
+    { key: 'tactile_continuous', label: 'Tactile guidance is continuous and usable for this entire segment', kind: 'boolean' },
+    { key: 'level_connection_checked', label: 'Physical connection between mapped levels has been checked', kind: 'boolean' },
+    { key: 'deck_height_m', label: 'Measured deck height above local ground (m; elevated path only)', kind: 'number', min: 0, max: 80 },
+    { key: 'opening_hours', label: 'Passage access hours: 24/7, or Mo-Fr 09:00-17:00', kind: 'text' },
+    { key: 'step_count', label: 'Number of steps on this segment', kind: 'number', min: 0, max: 500 },
+    { key: 'kerb_height_m', label: 'Highest kerb at crossing (metres)', kind: 'number', min: 0, max: 1, crossingOnly: true },
     { key: 'audible_signal', label: 'Audible pedestrian signal is working', kind: 'boolean', crossingOnly: true },
     { key: 'crossing_width_m', label: 'Crossing width (metres)', kind: 'number', min: .1, max: 100, crossingOnly: true },
     { key: 'ped_green_s', label: 'Pedestrian green phase (seconds)', kind: 'number', min: 0, max: 300, crossingOnly: true },
@@ -20,6 +26,7 @@ const PATH_FIELDS: ObservationField[] = [
     { key: 'lit_ratio', label: 'Lit portion (%)', kind: 'number', min: 0, max: 100, percent: true },
 ];
 const ASSET_FIELDS: ObservationField[] = [
+    { key: 'tactile_continuous', label: 'Continuous tactile guidance to and through this access point is checked', kind: 'boolean' },
     { key: 'available', label: 'Access point or facility is available', kind: 'boolean' },
     { key: 'path_connection', label: 'Physical connection to the mapped footpath checked', kind: 'boolean' },
     { key: 'step_free', label: 'Connection and access point are step-free', kind: 'boolean' },

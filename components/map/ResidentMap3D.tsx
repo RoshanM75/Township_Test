@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Crosshair } from 'lucide-react';
 import {
     Map as LibreMap, AttributionControl, LngLatBounds, Marker, NavigationControl, Popup, ScaleControl,
-    type GeoJSONSource, type StyleSpecification, type MapMouseEvent,
+    type GeoJSONSource, type StyleSpecification, type MapMouseEvent, type FilterSpecification, type ExpressionSpecification,
 } from 'maplibre-gl';
 import type { Feature, FeatureCollection, LineString, Polygon } from 'geojson';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -15,7 +15,7 @@ import { DEFAULT_ORIGIN } from '@/lib/precinct';
 import { residentText } from '@/lib/resident-language';
 import { shadeLabel } from '@/lib/shade-display';
 import type { InteractiveMapProps } from './InteractiveMap';
-import { detailBaseLayers, detailBuildingLayers, detailLabelLayers, DETAIL_LABEL_LAYERS, INSPECT_BASE_LAYERS, labelSize } from './detailed-map-style';
+import { detailBaseLayers, detailBuildingLayers, detailLabelLayers, DETAIL_LABEL_LAYERS, INSPECT_BASE_LAYERS, LEVEL_PATH_LAYERS, PEDESTRIAN_DETAIL_LAYERS, labelSize } from './detailed-map-style';
 import { featureDescription, type MapProperties } from '@/lib/map-detail';
 import { attachTerrainLabels } from './terrain-labels';
 import { MAP_CAUTION, ROOF_COVER, ROUTE_ALTERNATIVE, ROUTE_OUTLINE, WALK_ROUTE, WALK_ROUTE_HC, mapFacilitySymbol } from './walking-map-theme';
@@ -108,7 +108,7 @@ export default function ResidentMap3D({
     area, segments, onUnavailable, startCoords = DEFAULT_ORIGIN, endCoords, endDetail, startLabel = 'Start', routes, fitLabel,
     activeRouteId, reports, assets, liveLocation, focusLocation, reduceMotion, highContrast,
     selectedLocation, onLocationSelect, informationLayer, routeRoof = noRoof, labelScale = 1, language = 'en',
-    solar, shadeAt, routeShade, describeAsset, onShadeReport, terrainDetail, showTerrain = true, showTerrainMesh = false,
+    solar, shadeAt, routeShade, describeAsset, onShadeReport, terrainDetail, showTerrain = true, showTerrainMesh = false,mapLevel='all',showPedestrianDetails=true,
 }: Props) {
     const container = useRef<HTMLDivElement>(null);
     const mapRef = useRef<LibreMap | null>(null);
@@ -177,6 +177,23 @@ export default function ResidentMap3D({
             button?.setAttribute('title', residentText(language, label));
         }
     }, [loaded, labelScale, language,highContrast]);
+
+    useEffect(()=>{
+        const map=mapRef.current;if(!loaded||!map)return;
+        const filters=new Map([...detailBaseLayers(),...detailBuildingLayers(),...detailLabelLayers()].map(layer=>[layer.id,'filter' in layer?layer.filter:undefined]));
+        const match:ExpressionSpecification|undefined=mapLevel==='all'?undefined:mapLevel.startsWith('floor:')
+            ? ['in',`;${mapLevel.slice(6)};`,['concat',';',['coalesce',['get','level'],''],';']]
+            : ['in',`|${mapLevel}|`,['concat','|',['coalesce',['get','levelGroup'],'unknown'],'|']];
+        for(const id of LEVEL_PATH_LAYERS){
+            const filter=filters.get(id);
+            map.setFilter(id,(match?(filter?['all',filter,match]:match):filter??null) as FilterSpecification|null);
+        }
+        for(const id of PEDESTRIAN_DETAIL_LAYERS)map.setLayoutProperty(id,'visibility',showPedestrianDetails?'visible':'none');
+        // Keep an underground alignment visible rather than burying it under
+        // the decorative building volumes. Route overlays are never filtered.
+        for(const id of ['building-volumes','canopy-volumes'])map.setLayoutProperty(id,'visibility',mapLevel==='below'||mapLevel.startsWith('floor:-')?'none':'visible');
+        map.setPaintProperty('building-footprints','fill-opacity',mapLevel==='below'||mapLevel.startsWith('floor:-')?.28:1);
+    },[loaded,mapLevel,showPedestrianDetails]);
 
     useEffect(()=>{
         const map=mapRef.current;if(!loaded||!map)return;

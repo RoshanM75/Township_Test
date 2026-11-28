@@ -4,12 +4,17 @@ export interface ShadeObject {
     ring: LngLat[];
     height: number;
     base: number;
+    holes?: LngLat[][];
+    source_ref?: string;
+    source?: string;
+    height_source?: string;
 }
 
 export interface ShadeDataset {
     centre: LngLat;
     objects: ShadeObject[];
     non_ground_ways?: string[];
+    coverage?: 'partial';
 }
 
 export type SunCondition = 'sun' | 'shade' | 'covered' | 'night' | 'unknown';
@@ -87,6 +92,38 @@ function intersects(ring: LngLat[], a: LngLat, b: LngLat) {
     return false;
 }
 
+/** The ray must touch solid material, not the inside of a mapped courtyard. */
+function intersectsSolid(ring: LngLat[], holes: LngLat[][], a: LngLat, b: LngLat) {
+    if (!holes.length) return intersects(ring, a, b);
+    const solid = (p: LngLat) => inside(p, ring) && !holes.some(h => inside(p, h));
+    if (solid(a) || solid(b)) return true;
+    const dx=b[0]-a[0],dy=b[1]-a[1],times=[0,1];
+    for(const boundary of [ring,...holes])for(let i=0,j=boundary.length-1;i<boundary.length;j=i++){
+        const [x,y]=boundary[j],sx=boundary[i][0]-x,sy=boundary[i][1]-y,cross=dx*sy-dy*sx;
+        if(Math.abs(cross)<1e-9)continue;
+        const t=((x-a[0])*sy-(y-a[1])*sx)/cross,u=((x-a[0])*dy-(y-a[1])*dx)/cross;
+        if(t>0&&t<1&&u>=0&&u<=1)times.push(t);
+    }
+    times.sort((x,y)=>x-y);
+    return times.slice(1).some((t,i)=>{const m=(t+times[i])/2;return solid([a[0]+dx*m,a[1]+dy*m]);});
+}
+
+// Decompose a polygon with holes into non-overlapping scanline bands for the
+// rendered shadow top. This preserves open courtyards without a mesh library.
+function solidTop(ring: LngLat[], holes: LngLat[][]): LngLat[][] {
+    if(!holes.length)return [ring];
+    const rings=[ring,...holes], ys=[...new Set(rings.flat().map(p=>p[1]))].sort((a,b)=>a-b);
+    const edges=rings.flatMap(r=>r.map((p,i)=>[p,r[(i+1)%r.length]] as const)).filter(([a,b])=>a[1]!==b[1]);
+    const at=([a,b]:readonly [LngLat,LngLat], y:number)=>a[0]+(b[0]-a[0])*(y-a[1])/(b[1]-a[1]);
+    const result:LngLat[][]=[];
+    for(let i=1;i<ys.length;i++){
+        const low=ys[i-1],high=ys[i],mid=(low+high)/2;
+        const active=edges.filter(([a,b])=>mid>Math.min(a[1],b[1])&&mid<Math.max(a[1],b[1])).sort((a,b)=>at(a,mid)-at(b,mid));
+        for(let j=1;j<active.length;j+=2){const l=active[j-1],r=active[j];result.push([[at(l,low),low],[at(r,low),low],[at(r,high),high],[at(l,high),high]]);}
+    }
+    return result;
+}
+
 const models = new WeakMap<ShadeDataset, ReturnType<typeof buildModel>>();
 export function solarModel(dataset: ShadeDataset) {
     const existing = models.get(dataset);
@@ -97,7 +134,7 @@ export function solarModel(dataset: ShadeDataset) {
 }
 export type SolarModel = ReturnType<typeof solarModel>;
 
-function buildModel({ centre, objects, non_ground_ways }: ShadeDataset) {
+function buildModel({ centre, objects, non_ground_ways, coverage }: ShadeDataset) {
     const nonGroundWays = new Set(non_ground_ways);
     const lonScale = 111320 * Math.cos(centre[1] * radians);
     const latScale = 110574;
@@ -105,7 +142,8 @@ function buildModel({ centre, objects, non_ground_ways }: ShadeDataset) {
     const unproject = ([x, y]: LngLat): LngLat => [x / lonScale + centre[0], y / latScale + centre[1]];
     const shapes = objects.map(object => {
         const ring = object.ring.map(project);
-        return { ...object, ring, bounds: boundsOf(ring) };
+        const holes=object.holes?.map(h=>h.map(project))??[];
+        return { ...object, ring, holes, tops:solidTop(ring,holes), bounds: boundsOf(ring) };
     });
     type Shape = (typeof shapes)[number];
     const bucket = (v: number) => Math.floor(v / cellSize);
@@ -136,14 +174,14 @@ function buildModel({ centre, objects, non_ground_ways }: ShadeDataset) {
         positions.set(minute, sun);
         return sun;
     }
-    function atPoint(coordinate: LngLat, at: number): ShadeReading {
-        if (!Number.isFinite(at)) return { condition: 'unknown', source: 'unknown' };
+    function atPoint(coordinate: LngLat, at: number, elevation = 0): ShadeReading {
+        if (!Number.isFinite(at) || !Number.isFinite(elevation)) return { condition: 'unknown', source: 'unknown' };
         const [east, north, up] = position(at);
         if (up <= 0) return { condition: 'night', source: 'modelled' };
         if (up < minimumElevation || !maxHeight) return { condition: 'unknown', source: 'unknown' };
         const [x, y] = project(coordinate);
         const dx = east / up, dy = north / up;
-        const rayPoint = (height: number): LngLat => [x + height * dx, y + height * dy];
+        const rayPoint = (height: number): LngLat => [x + (height-elevation) * dx, y + (height-elevation) * dy];
         let col = bucket(x), row = bucket(y);
         const localData = nearby.has(key(col, row));
         // Traverse only the cells intersected by the ray towards the sun.
@@ -157,16 +195,17 @@ function buildModel({ centre, objects, non_ground_ways }: ShadeDataset) {
             for (const object of cells.get(key(col, row)) ?? []) {
                 if (seen.has(object)) continue;
                 seen.add(object);
-                const start = rayPoint(object.base), end = rayPoint(object.height);
-                if (overlaps(boundsOf([start, end]), object.bounds) && intersects(object.ring, start, end)) {
+                if(object.height<elevation)continue;
+                const start = rayPoint(Math.max(object.base,elevation)), end = rayPoint(object.height);
+                if (overlaps(boundsOf([start, end]), object.bounds) && intersectsSolid(object.ring, object.holes, start, end)) {
                     return { condition: 'shade', source: 'modelled' };
                 }
             }
-            if (Math.min(nextX, nextY) > maxHeight) break;
+            if (Math.min(nextX, nextY) > Math.max(0,maxHeight-elevation)) break;
             if (nextX < nextY) { col += stepX; nextX += deltaX; }
             else { row += stepY; nextY += deltaY; }
         }
-        return localData ? { condition: 'sun', source: 'modelled' } : { condition: 'unknown', source: 'unknown' };
+        return localData && coverage!=='partial' ? { condition: 'sun', source: 'modelled' } : { condition: 'unknown', source: 'unknown' };
     }
     function shadowRings(at: number, bounds: ShadeBounds): LngLat[][] {
         if (!Number.isFinite(at)) return [];
@@ -175,16 +214,15 @@ function buildModel({ centre, objects, non_ground_ways }: ShadeDataset) {
         const [w, s] = project([bounds[0], bounds[1]]), [e, n] = project([bounds[2], bounds[3]]);
         const dx = -east / up, dy = -north / up;
         const rings: LngLat[][] = [];
-        for (const { ring, height, base, bounds: [left, bottom, right, top] } of shapes) {
+        for (const { ring, holes, tops, height, base, bounds: [left, bottom, right, top] } of shapes) {
             if (!overlaps([left + Math.min(base * dx, height * dx), bottom + Math.min(base * dy, height * dy),
                 right + Math.max(base * dx, height * dx), top + Math.max(base * dy, height * dy)], [w, s, e, n])) continue;
-            const atHeight = (h: number) => ring.map(([x, y]) => unproject([x + h * dx, y + h * dy]));
-            const lower = atHeight(base), upper = atHeight(height);
-            rings.push([...upper, upper[0]]);
-            if (base === height) continue;
-            for (let i = 0; i < ring.length; i++) {
-                const next = (i + 1) % ring.length;
-                rings.push([lower[i], lower[next], upper[next], upper[i], lower[i]]);
+            const atHeight = (shape:LngLat[],h:number) => shape.map(([x,y])=>unproject([x+h*dx,y+h*dy]));
+            for(const top of tops){const upper=atHeight(top,height);rings.push([...upper,upper[0]]);}
+            if(base===height)continue;
+            for(const boundary of [ring,...holes]){
+                const lower=atHeight(boundary,base),upper=atHeight(boundary,height);
+                for(let i=0;i<boundary.length;i++){const next=(i+1)%boundary.length;rings.push([lower[i],lower[next],upper[next],upper[i],lower[i]]);}
             }
         }
         return rings;

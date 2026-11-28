@@ -1,3 +1,4 @@
+import { separateExplicitLevels, type WorldWay } from './pedestrian-world.ts';
 /**
  * AksesMy routing engine.
  *
@@ -22,6 +23,12 @@ export interface PathNode {
 }
 
 export interface PathEdge {
+    world?: WorldWay;
+    shared_shade?: boolean;
+    path_opening_hours?: string;
+    tactile_continuous?: boolean;
+    deck_height_m?:number;
+    level_connection_checked?:boolean;
     has_tactile?: boolean | null;
     audible_signal?: boolean | null;
     clear_width_m?: number | null;
@@ -139,6 +146,7 @@ export function slotForHour(hour: number): TimeSlot {
 // Graph helpers
 // ---------------------------------------------------------------------------
 export function buildGraph(nodes: PathNode[], edges: PathEdge[]): Graph {
+    ({nodes,edges}=separateExplicitLevels(nodes,edges.filter(e=>e.kind!=='street'&&e.pedestrian_access!==false)));
     const nm = new Map<number, PathNode>();
     for (const rawN of nodes) {
         const id = Number(rawN.id);
@@ -313,6 +321,7 @@ export interface CostContext {
     strictUnknown?: boolean;
     speedMps?: number;
     heatMultiplier?: number;
+    rainMultiplier?: number;
     preferControlledCrossings?: boolean;
 }
 
@@ -471,7 +480,7 @@ export function evaluateEdge(e: PathEdge, ctx: CostContext): EdgeEval {
     const dark_m = isNight ? length_m * (1 - lit) : 0;
     const heat = isNight ? 0 : sun_s * w.heat * (ctx.heatMultiplier ?? 1);
     const dark = isNight ? walk_s * (1 - lit) * w.dark : 0;
-    const rainExposure = ctx.mode === 'sheltered' && e.covered !== true ? walk_s * 4 : 0;
+    const rainExposure = ctx.mode === 'sheltered' && e.covered !== true ? walk_s * 4 * (ctx.rainMultiplier ?? 1) : 0;
 
     return {
         cost: walk_s + wait_s + penalty + heat + dark + rainExposure,

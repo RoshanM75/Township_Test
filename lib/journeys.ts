@@ -9,6 +9,7 @@ import type { CommunityRoute } from './community-routes.ts';
 import { placeHours } from './place-details.ts';
 import { groupShadeChecks, journeyShade, pathShade } from './route-shade.ts';
 import type { SolarModel } from './solar-shade.ts';
+import { forecastWeights } from './comfort.ts';
 import { assetFacts, arrivalFields, usableAccess, observedEdge, requiredEdgeFields, edgeRestrictions, barrierAtAsset, barrierOnEdge, type RouteBarrier } from './route-conditions.ts';
 
 const MODES: Mode[] = ['direct', 'coolest', 'sheltered', 'safest'];
@@ -17,7 +18,7 @@ const TIME_EPS = .001;
 const FIELD_LABELS: Record<string, string> = { path_open: 'path condition', surface_rating: 'surface condition', has_steps: 'steps',
     slope_pct: 'slope', crossing_type: 'crossing type', has_kerb_ramp: 'kerb ramps', shade_morning: 'morning shade',
     shade_midday: 'midday shade', shade_afternoon: 'afternoon shade', lit_ratio: 'lighting', covered: 'roof cover',
-    clear_width_m: 'clear width', has_tactile: 'tactile paving', audible_signal: 'audible signal' };
+    clear_width_m: 'clear width', has_tactile: 'tactile paving', audible_signal: 'audible signal', tactile_continuous: 'continuous tactile paving', level_connection_checked: 'level connection', opening_hours:'passage access hours' };
 
 export function normaliseNeeds(value: unknown): WalkingNeeds {
     const input = value && typeof value === 'object' ? value as Record<string, unknown> : {};
@@ -32,6 +33,7 @@ export function normaliseNeeds(value: unknown): WalkingNeeds {
         min_clear_width_m: typeof input.min_clear_width_m === 'number' && Number.isFinite(input.min_clear_width_m)
             ? Math.max(.5, Math.min(3, input.min_clear_width_m)) : null,
         require_tactile_crossings: input.require_tactile_crossings === true,
+        require_tactile_continuity: input.require_tactile_continuity === true,
         require_audible_crossings: input.require_audible_crossings === true,
         rest_backrest: input.rest_backrest === true, rest_armrests: input.rest_armrests === true, rest_shelter: input.rest_shelter === true,
         max_slope_pct: number('max_slope_pct', 0, 20), rest_interval_min: number('rest_interval_min', 1, 30),
@@ -68,7 +70,9 @@ function prepare(nodes: PathNode[], rawEdges: PathEdge[], data: WalkingData, inp
     for (const edge of startAsset ? [] : projected) {
         if (edge.geometry.length < 2) continue;
         const projection = projectPoint(edge.geometry, [input.origin[1], input.origin[0]]);
-        if (!closest || projection.distance < closest.distance) closest = { edge, ...projection };
+        const surface=!edge.world||edge.world.levelGroups.includes('ground');
+        const priorSurface=!closest?.edge.world||closest.edge.world.levelGroups.includes('ground');
+        if (!closest || projection.distance < closest.distance-(priorSurface&&!surface?3:0) || (surface&&!priorSurface&&projection.distance<=closest.distance+3)) closest = { edge, ...projection };
     }
     if (!closest || closest.distance > (startAsset ? 100 : 50)) return null;
     const anchors: PathAnchor[] = [{ key: 'origin', edge_id: closest.edge.id, fraction: closest.fraction }];
@@ -121,6 +125,7 @@ function search(prepared: Prepared, destination: number, entrance: WalkingAsset,
         const { evidence: e, values: v } = assetFacts(asset, data, input.departure_at);
         const required = ['available', 'path_connection', input.profile === 'wheelchair' ? 'wheelchair_space' : 'has_seat'];
         if (input.needs.step_free || requiresStepFreeProfile(input.profile)) required.push('step_free');
+        if(input.needs.require_tactile_continuity)required.push('tactile_continuous');
         if (input.needs.rest_backrest) required.push('backrest');
         if (input.needs.rest_armrests) required.push('armrests');
         if (input.needs.rest_shelter) required.push('sheltered');
@@ -152,11 +157,11 @@ function search(prepared: Prepared, destination: number, entrance: WalkingAsset,
     };
     const initialSince = Math.max(0, Math.min(120, input.initial_without_rest_min ?? 0)) * 60;
     offer({ node: prepared.origin, cost: startSeconds, elapsed: startSeconds, sinceRest: startSeconds + initialSince, longest: startSeconds + initialSince, active: true });
-    const cache = new Map<number, ReturnType<typeof evaluateEdge>>();
+    const cache = new Map<string, ReturnType<typeof evaluateEdge>>();
     const solar = ctx.mode === 'coolest' && ctx.slot !== 'night' ? prepared.shade : undefined;
     const solarCost = new Map<string, number>();
     const departureAt = Date.parse(input.departure_at);
-    const heatWeight = MODE_WEIGHTS[ctx.mode].heat * (ctx.heatMultiplier ?? 1);
+    const weatherCache=new Map<number,ReturnType<typeof forecastWeights>>();
     let examined = 0;
     while (queue.items.length) {
         const label = queue.pop(); if (!label.active) continue;
@@ -169,7 +174,7 @@ function search(prepared: Prepared, destination: number, entrance: WalkingAsset,
             const facts = assetFacts(rest, data, arrivalAtRest), { values, evidence } = facts;
             const required = ['available', 'path_connection', input.profile === 'wheelchair' ? 'wheelchair_space' : 'has_seat',
                 ...(input.needs.step_free || requiresStepFreeProfile(input.profile) ? ['step_free'] : []),
-                ...(input.needs.rest_backrest ? ['backrest'] : []), ...(input.needs.rest_armrests ? ['armrests'] : []), ...(input.needs.rest_shelter ? ['sheltered'] : [])];
+                ...(input.needs.require_tactile_continuity?['tactile_continuous']:[]), ...(input.needs.rest_backrest ? ['backrest'] : []), ...(input.needs.rest_armrests ? ['armrests'] : []), ...(input.needs.rest_shelter ? ['sheltered'] : [])];
             if (!required.every(f => isConfirmed(evidence, f) && values[f] === true) || ['private','permission','customers','destination'].includes(String(values.public_access)) || openingAt(values.opening_hours, arrivalAtRest) === false) continue;
             if (label.sinceRest > TIME_EPS && (!input.needs.require_rests || label.sinceRest + detour <= interval + TIME_EPS)) {
                 const seconds = detour * 2 + input.needs.rest_duration_min * 60;
@@ -179,10 +184,19 @@ function search(prepared: Prepared, destination: number, entrance: WalkingAsset,
         }
         for (const { edge, to } of prepared.graph.adj.get(label.node) ?? []) {
             if (!permitted.get(edge.source_edge_id!)) continue;
-            let evaluation = cache.get(edge.id);
-            if (!evaluation) { evaluation = evaluateEdge(edge, ctx); cache.set(edge.id, evaluation); }
+            // Forecasts have hourly resolution, so reuse weights for each arrival hour.
+            const entryAt=departureAt+label.elapsed*1000,hour=Math.floor(entryAt/3600000);
+            let localWeather=weatherCache.get(hour);
+            if(input.weather&&!localWeather){localWeather=forecastWeights(input.weather,entryAt);weatherCache.set(hour,localWeather);}
+            const edgeContext=localWeather?.forecast?{...ctx,heatMultiplier:localWeather.heat,rainMultiplier:localWeather.rain}:ctx;
+            const cacheKey=`${edge.id}:${localWeather?.forecast?hour:'static'}`;
+            let evaluation = cache.get(cacheKey);
+            if (!evaluation) { evaluation = evaluateEdge(edge, edgeContext); cache.set(cacheKey, evaluation); }
             if (evaluation.hard.length) continue;
             const seconds = evaluation.walk_s + evaluation.wait_s;
+            const passageHours=edge.path_opening_hours??edge.world?.openingHours;
+            if(passageHours&&(openingAt(passageHours,new Date(entryAt).toISOString())===false||openingAt(passageHours,new Date(entryAt+seconds*1000).toISOString())===false))continue;
+            const heatWeight=MODE_WEIGHTS[ctx.mode].heat*(edgeContext.heatMultiplier??1);
             let cost = evaluation.cost;
             if (solar && !ctx.hazards.get(edge.source_edge_id!)?.some(hazard => hazard.kind === 'no_shade')) {
                 const original = solar.edges.get(edge.source_edge_id!)!;
@@ -378,6 +392,7 @@ export function planJourney(nodes: PathNode[], edges: PathEdge[], data: WalkingD
     if (!Number.isFinite(Date.parse(input.departure_at))) return { routes: {}, recommended: null, reasons: ['Choose a valid departure time.'] };
     const prepared = prepare(nodes, edges, data, input, solar);
     if (!prepared) return { routes: {}, recommended: null, issue: { kind: 'start' }, reasons: ['Your start is more than 50 metres from a mapped pedestrian path.'] };
+    if(input.needs.require_tactile_continuity&&!prepared.startAsset&&prepared.offset>1)return {routes:{},recommended:null,issue:{kind:'start'},reasons:['Continuous tactile guidance from this starting position to the mapped path has not been checked. Choose a checked access point.']};
     const unavailable = unavailableAssetIds(hazards, input.needs.step_free || requiresStepFreeProfile(input.profile));
     if (prepared.startAsset) {
         const start = prepared.startAsset, facts = assetFacts(start, data, input.departure_at);
@@ -418,6 +433,8 @@ export function planJourney(nodes: PathNode[], edges: PathEdge[], data: WalkingD
     ] };
     const speed = input.needs.speed_mps ?? PROFILES[input.profile].speed_mps;
     const slot = slotForHour(malaysiaHour(input.departure_at));
+    const climate=forecastWeights(input.weather,Date.parse(input.departure_at),feelsLike);
+    const rainLikely=(climate.rainRisk??0)>=.5;
     const hasCover = [...prepared.graph.edges.values()].some(edge => edge.covered === true);
     for (const mode of modes) {
         if (mode === 'sheltered' && !hasCover) continue;
@@ -429,7 +446,7 @@ export function planJourney(nodes: PathNode[], edges: PathEdge[], data: WalkingD
                 .every(f => isConfirmed(evidence, f))) continue;
             const ctx: CostContext = { mode, profile: input.profile, slot, speedMps: speed,
                 strictUnknown: input.needs.verified_only, hazards: indexHazards(hazards),
-                preferControlledCrossings: mode === 'safest' && input.needs.comfort?.includes('controlled_crossings'), heatMultiplier: feelsLike != null && feelsLike >= 32 ? 1.5 : 1 };
+                preferControlledCrossings: mode === 'safest' && input.needs.comfort?.includes('controlled_crossings'), heatMultiplier: climate.heat, rainMultiplier: climate.rain };
             const found = search(prepared, prepared.assets.get(entrance.id)!, entrance, data, input, ctx, false, unavailable);
             if (!found) continue;
             if ('limited' in found) { searchLimited = true; continue; }
@@ -447,11 +464,11 @@ export function planJourney(nodes: PathNode[], edges: PathEdge[], data: WalkingD
     const available = MODES.filter(m => routes[m] && !(slot === 'night' && m === 'coolest'));
     const standard = available.filter(mode => mode !== 'sheltered');
     const personalised = !!input.needs.comfort?.length;
-    const recommended = (personalised ? available : standard.length ? standard : available).sort((a, b) => {
+    const recommended = (personalised || rainLikely ? available : standard.length ? standard : available).sort((a, b) => {
         const ra = routes[a]!, rb = routes[b]!;
-        if (personalised) return preferenceRank(ra, input.needs, slot, speed) - preferenceRank(rb, input.needs, slot, speed);
+        if (personalised) return preferenceRank(ra, input.needs, slot, speed) - preferenceRank(rb, input.needs, slot, speed) + (rainLikely?(ra.unsheltered_m-rb.unsheltered_m)/(speed*15):0);
         const score = (r: JourneyRoute) => (r.suitability === 'green' ? 0 : 10000) + r.unchecked_segments * 10
-            + r.total_min + (slot === 'night' ? r.dark_m / 10 : r.uncovered_m / (feelsLike != null && feelsLike >= 32 ? 20 : 50));
+            + r.total_min + (slot === 'night' ? r.dark_m / 10 : r.uncovered_m * climate.heat / 45) + (rainLikely?r.unsheltered_m/(speed*15):0);
         return score(ra) - score(rb);
     })[0] ?? null;
     if (available.length) return { routes, recommended, reasons: [] };
@@ -461,7 +478,7 @@ export function planJourney(nodes: PathNode[], edges: PathEdge[], data: WalkingD
     const reasons = [input.needs.require_rests ? `The planner needs a verified rest spot within each ${input.needs.rest_interval_min}-minute stretch.`
         : input.needs.verified_only ? 'The planner needs current checks for the paths, crossings and arrival point.'
         : `No route fits your ${input.needs.budget_min}-minute budget and walking needs.`,
-        ...(input.needs.min_clear_width_m !== null || input.needs.require_tactile_crossings || input.needs.require_audible_crossings
+        ...(input.needs.min_clear_width_m !== null || input.needs.require_tactile_crossings || input.needs.require_tactile_continuity || input.needs.require_audible_crossings
             ? ['Some paths or crossings may lack recorded width, tactile paving or audible signal information.'] : [])];
     return { routes, recommended, barriers: diagnosticBarriers(prepared, accessCandidates, data, input, hazards), issue: { kind: 'needs' }, reasons };
 }
@@ -519,9 +536,12 @@ export function planReturnWalk(nodes: PathNode[], edges: PathEdge[], data: Walki
     const extended = { ...data, assets: [...data.assets, ...turns] };
     const prepared = prepare(nodes, edges, extended, input, solar);
     if (!prepared) return { routes: {}, recommended: null, issue: { kind: 'start' }, reasons: ['Your start is more than 50 metres from a mapped pedestrian path.'] };
+    if(needs.require_tactile_continuity&&!prepared.startAsset&&prepared.offset>1)return {routes:{},recommended:null,issue:{kind:'start'},reasons:['Continuous tactile guidance from this starting position has not been checked. Choose a checked access point.']};
     const routes: JourneyPlan['routes'] = {};
     const slot = slotForHour(malaysiaHour(request.departure_at));
-    const hasCover = needs.comfort?.includes('shelter') && [...prepared.graph.edges.values()].some(edge => edge.covered === true);
+    const climate=forecastWeights(input.weather,Date.parse(input.departure_at),feelsLike);
+    const rainLikely=(climate.rainRisk??0)>=.5;
+    const hasCover = (rainLikely||needs.comfort?.includes('shelter')) && [...prepared.graph.edges.values()].some(edge => edge.covered === true);
     const unavailable = unavailableAssetIds(hazards, needs.step_free || requiresStepFreeProfile(input.profile));
     if (prepared.startAsset) {
         const start = prepared.startAsset, facts = assetFacts(start, extended, input.departure_at);
@@ -532,7 +552,7 @@ export function planReturnWalk(nodes: PathNode[], edges: PathEdge[], data: Walki
     for (const mode of modes.filter(m => (m !== 'sheltered' || hasCover) && !(slot === 'night' && m === 'coolest'))) {
         let best = Infinity;
         const ctx: CostContext = { mode, profile: input.profile, slot, speedMps: speed, strictUnknown: needs.verified_only,
-            hazards: indexHazards(hazards), preferControlledCrossings: mode === 'safest' && needs.comfort?.includes('controlled_crossings'), heatMultiplier: feelsLike != null && feelsLike >= 32 ? 1.5 : 1 };
+            hazards: indexHazards(hazards), preferControlledCrossings: mode === 'safest' && needs.comfort?.includes('controlled_crossings'), heatMultiplier: climate.heat, rainMultiplier: climate.rain };
         for (const turn of turns) {
             const found = search(prepared, prepared.assets.get(turn.id)!, finish, extended, input, ctx, true, unavailable);
             if (!found || 'limited' in found) continue;
@@ -547,7 +567,7 @@ export function planReturnWalk(nodes: PathNode[], edges: PathEdge[], data: Walki
     }
     const recommended = needs.comfort?.length
         ? MODES.filter(m => routes[m]).sort((a, b) => preferenceRank(routes[a]!, needs, slot, speed, true) - preferenceRank(routes[b]!, needs, slot, speed, true))[0] ?? null
-        : (slot === 'night' && routes.safest ? 'safest' : routes.direct ? 'direct' : Object.keys(routes)[0] ?? null) as Mode | null;
+        : (rainLikely&&routes.sheltered&&(!routes.direct||routes.sheltered.suitability===routes.direct.suitability||routes.sheltered.suitability==='green')?'sheltered':slot === 'night' && routes.safest ? 'safest' : routes.direct ? 'direct' : Object.keys(routes)[0] ?? null) as Mode | null;
     return { routes, recommended, reasons: recommended ? [] : ['No return walk meets your current walking needs, continuous rest interval and total budget. Your requirements have not been relaxed.'] };
 }
 

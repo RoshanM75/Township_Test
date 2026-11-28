@@ -1,5 +1,6 @@
 import type { JourneyRoute, VerificationRecord } from './walking.ts';
 import type { PathEdge } from './routing.ts';
+import { pedestrianCue } from './pedestrian-guidance.ts';
 import { evidenceFor } from './verification.ts';
 
 export interface TimelineItem { id: string; title: string; detail: string; start_min: number; end_min: number; distance_m: number; edge_id?: number; point: [number, number]; kind: 'path' | 'crossing' | 'rest' | 'connection' | 'turn' | 'errand' | 'arrival' }
@@ -23,10 +24,12 @@ export function walkTimeline(route: JourneyRoute, edges: PathEdge[], records: Ve
             return `${name} ${rendered} (${fact?.status === 'verified' ? say('checked', 'disemak') : fact?.status === 'reported' ? say('reported', 'dilaporkan') : say('mapped', 'dipetakan')})`;
         };
         const kind = step.kind === 'turn' ? 'turn' : step.kind === 'rest' ? 'rest' : step.kind==='errand'?'errand': step.kind === 'connection' ? 'connection' : edge?.is_crossing ? 'crossing' : 'path';
+        const guidance=pedestrianCue(step,edge,records,route.arrival_at,language);
         const title = kind === 'crossing' ? `${say('Crossing', 'Lintasan')} · ${step.name}`
             : kind==='errand'? `${say('Visit','Singgah')} · ${step.name}`
             : kind === 'rest' ? `${say('Rest', 'Rehat')} · ${step.name}`
             : kind === 'turn' ? say(step.name, 'Mula perjalanan pulang')
+            : edge?.world?.connector||edge?.world?.structure==='indoor'?`${guidance.heading} · ${step.name}`
             : step.name.startsWith('Footpath ') ? say('Follow the mapped footpath', 'Ikut laluan pejalan kaki pada peta') : step.name;
         const detail = kind === 'turn' ? say('Follow the return path. Your planned rest intervals still apply.',
             'Ikut laluan pulang dan teruskan rehat mengikut jadual.')
@@ -37,6 +40,7 @@ export function walkTimeline(route: JourneyRoute, edges: PathEdge[], records: Ve
                 : covered === false ? say('No roof cover recorded', 'Tiada bumbung direkodkan') : say('Roof cover unknown', 'Maklumat bumbung belum diketahui'),
                 typeof slope === 'number' ? `${say('Slope', 'Kecerunan')} ${slope}%` : say('Slope unknown', 'Kecerunan belum diketahui'),
                 describe('clear_width_m', say('Clear width', 'Lebar laluan bebas halangan'), ' m'),
+                ...(edge?.world||edge?.is_crossing?[guidance.detail]:[]),
                 ...(kind === 'crossing' ? [
                     evidence.crossing_type?.status === 'verified' ? say('Crossing type currently checked', 'Jenis lintasan telah disemak')
                         : say('Crossing needs confirmation', 'Lintasan perlu disahkan'),

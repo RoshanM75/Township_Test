@@ -29,7 +29,7 @@ function attributes(value: unknown, target: VerificationTarget) {
         } else if (spec.kind === 'number') {
             const min = spec.percent ? 0 : spec.min ?? -Infinity;
             const max = spec.percent ? 1 : spec.max ?? Infinity;
-            if (typeof v !== 'number' || !Number.isFinite(v) || v < min || v > max || (field === 'surface_rating' && !Number.isInteger(v))) throw new RequestError(`${field} is out of range.`);
+            if (typeof v !== 'number' || !Number.isFinite(v) || v < min || v > max || (['surface_rating','step_count'].includes(field) && !Number.isInteger(v))) throw new RequestError(`${field} is out of range.`);
         } else if (spec.kind === 'choice') {
             if (typeof v !== 'string' || !spec.options?.includes(v)) throw new RequestError(`Choose a valid value for ${field}.`);
         } else if (field === 'opening_hours') text(v, 'Opening hours', 100);

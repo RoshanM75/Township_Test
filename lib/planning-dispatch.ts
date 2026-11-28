@@ -5,6 +5,7 @@ import { WALK_BUDGETS, type JourneyPlan, type WalkingData, type PlanningInput } 
 import type { CommunityRoute } from './community-routes.ts';
 import { compareMaintenanceImpact, type ImpactRequest } from './maintenance-impact.ts';
 import { planErrands, type ErrandRequest } from './errand-planner.ts';
+import type { WalkingWeather } from './comfort.ts';
 import { solarModel, type ShadeDataset } from './solar-shade.ts';
 
 export interface PlanningSnapshot {
@@ -13,6 +14,7 @@ export interface PlanningSnapshot {
     walking: WalkingData;
     hazards: HazardReport[];
     shade?: ShadeDataset;
+    weather?: WalkingWeather|null;
 }
 
 export interface SearchCommand {
@@ -42,7 +44,8 @@ export type PlanningCommand = SearchCommand | { type: 'impact'; request: ImpactR
 };
 
 export function dispatchPlan(snapshot: PlanningSnapshot, command: PlanningCommand) {
-    const { nodes, edges, walking, hazards, shade } = snapshot;
+    const { nodes, edges, walking, hazards, shade, weather } = snapshot;
+    if(command.type!=='impact'&&command.type!=='departures'&&weather)command={...command,input:{...command.input,weather}};
     const model = shade && solarModel(shade);
     switch (command.type) {
         case 'journey': {
@@ -61,7 +64,7 @@ export function dispatchPlan(snapshot: PlanningSnapshot, command: PlanningComman
                 reasons: [`A matching route takes about ${minutes} min. Your trip budget is ${input.needs.budget_min} min.`],
             } satisfies JourneyPlan;
         }
-        case 'impact': return compareMaintenanceImpact(nodes,edges,walking,hazards,command.request);
+        case 'impact': return compareMaintenanceImpact(nodes,edges,walking,hazards,command.request,shade);
         case 'errands':
             if (!command.errands) throw Error('Choose your errands.');
             return planErrands(nodes, edges, walking, command.input, command.errands, hazards, command.feels_like,model);
@@ -79,7 +82,7 @@ export function dispatchPlan(snapshot: PlanningSnapshot, command: PlanningComman
             if (!model) return [];
             return command.times.flatMap(({ departure, feels_like }): DepartureOption[] => {
                 const { plan, mode } = command;
-                const input = { ...plan.input, departure_at: departure };
+                const input = { ...plan.input, departure_at: departure, weather };
                 const result = plan.type === 'community' && plan.community
                     ? planCommunityJourney(nodes, edges, walking, input, plan.community, hazards, model)
                     : plan.type === 'return' ? planReturnWalk(nodes, edges, walking, input, hazards, feels_like, model, [mode])

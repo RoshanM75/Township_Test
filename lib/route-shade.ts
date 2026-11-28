@@ -24,7 +24,7 @@ const unknown: ShadeReading = { condition: 'unknown', source: 'unknown' };
 export function groupShadeChecks(records: VerificationRecord[]) {
     const grouped = new Map<string, VerificationRecord[]>();
     for (const record of records) {
-        if (!Object.keys(record.attributes).some(key => key.startsWith('shade_') || key === 'covered' || key === 'sheltered')) continue;
+        if (!Object.keys(record.attributes).some(key => key.startsWith('shade_') || key === 'covered' || key === 'sheltered' || key==='deck_height_m')) continue;
         const key = `${record.target_type}:${record.target_id}`;
         const current = grouped.get(key);
         if (current) current.push(record);
@@ -34,10 +34,12 @@ export function groupShadeChecks(records: VerificationRecord[]) {
 }
 
 export function pathShade(edge: PathEdge, records: VerificationRecord[], at: number, point: LngLat, model: SolarModel): ShadeReading {
-    const reading = model.atPoint(point, at);
+    const checkedHeight=records.length?evidenceFor(records,edge.is_crossing?'crossing':'path',edge.source_edge_id??edge.id,new Date(at).toISOString()).deck_height_m:undefined;
+    const levelHeight=checkedHeight?.status==='verified'&&typeof checkedHeight.value==='number'?checkedHeight.value:edge.world?.elevationM;
+    const reading = model.atPoint(point, at, levelHeight??0);
     if (reading.condition === 'night') return reading;
     if (!records.length && edge.covered === true) return { condition: 'covered', source: 'mapped' };
-    if (!records.length) return model.isGroundWay(edge.osm_way_id) ? reading : unknown;
+    if (!records.length) return (levelHeight!==undefined||model.isGroundWay(edge.osm_way_id)) ? reading : unknown;
     const time = new Date(at).toISOString();
     const target = edge.is_crossing ? 'crossing' : 'path', id = edge.source_edge_id ?? edge.id;
     const evidence = evidenceFor(records, target, id, time);
@@ -55,7 +57,8 @@ export function pathShade(edge: PathEdge, records: VerificationRecord[], at: num
     if (check?.status === 'verified' && (check.value === 0 || check.value === 1)) {
         return { condition: check.value === 1 ? 'shade' : 'sun', source: 'checked' };
     }
-    return model.isGroundWay(edge.osm_way_id) ? reading : unknown;
+    if(roof&&edge.covered===true&&!(roof.status==='verified'&&roof.value===true)&&reading.condition==='shade')return unknown;
+    return (levelHeight!==undefined||model.isGroundWay(edge.osm_way_id)) ? reading : unknown;
 }
 
 export function spotShade(asset: WalkingAsset, at: string, records: VerificationRecord[], model?: SolarModel): ShadeReading {

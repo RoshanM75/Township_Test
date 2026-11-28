@@ -8,7 +8,7 @@ import { csvRows } from '../lib/data/csv.ts';
 import { districtPopulation, railDemand, satelliteScenes, transitContext, wikidataLandmarks } from '../lib/data/context.ts';
 import { csvFile, download, fileDigest, gtfsFiles } from './data-download.mjs';
 import { mappedWayfinding } from './pilot-osm-details.mjs';
-import { modelPilotShade } from './pilot-shade.mjs';
+import { loadWalkingWorld,representativeShade } from './walking-world-source.mjs';
 import { connectTransitStops } from './pilot-transit-links.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -98,7 +98,12 @@ for (const area of areas) {
         !/^https:\/\//.test(survey.source_url ?? '') || !survey.license || !/^\d{4}-\d{2}-\d{2}$/.test(survey.data_at ?? ''))) {
         throw new Error('A canopy survey needs a local GeoJSON FeatureCollection, source_url, license and data_at.');
     }
-    const shade = modelPilotShade(bundle.graph.edges, raw.elements, PILOTS[area].centre, date, survey);
+    const world=await loadWalkingWorld(area,survey??undefined);
+    if(survey){ // Explicit source file with a reusable licence; the validated geometry is shared by future builds.
+        const publicSource=resolve(data,'source','pedestrian-survey.geojson');
+        await writeFile(publicSource,JSON.stringify(survey));
+    }
+    const shade={paths:Object.fromEntries(Object.entries(representativeShade(bundle.graph.edges,world.solar,world.world.ways,date)).map(([id,values])=>[id,{...values,shade_source:'modelled'}])),shade:{model_date:date,buildings:world.solar.buildings,crowns:world.solar.crowns}};
     const { paths, facilities, entrances, qids } = mappedWayfinding(bundle, raw);
     const mappedPathCount = Object.keys(paths).length;
     for (const [edge, values] of Object.entries(shade.paths)) paths[edge] = { ...paths[edge], ...values };
@@ -109,11 +114,10 @@ for (const area of areas) {
         'Source tags and street-level station entrances. Location and access details still need field checks.', { data_at: date }));
     put(source('shade-model', 'Building and canopy shade estimate', 'https://www.openstreetmap.org/copyright',
         'ODbL', 'partial', Object.keys(shade.paths).length,
-        `Daylight estimates using ${shade.shade.buildings} building footprints and ${shade.shade.crowns} measured crowns. Unknown height or canopy stays missing. Roof cover is separate.`,
+        `Daylight estimates using ${shade.shade.buildings} building footprints and ${shade.shade.crowns} source-qualified canopy shapes. Unknown height or canopy stays missing. Roof cover is separate.`,
         { data_at: date }));
-    if (survey) put(source('shade-survey', 'Supplied building and canopy survey', survey.source_url, survey.license,
-        'loaded', survey.features.length, 'Survey polygons and heights used for shade estimates.', { data_at: survey.data_at }));
-    else sources.delete('shade-survey');
+    for(const item of world.imported)put(source(`walking-model-${item.id}`,item.name,item.url,item.license,'loaded',item.records,'Source-qualified geometry shared by maps and solar estimates; not a live field check.',{data_at:item.data_at}));
+    sources.delete('shade-survey');
     put(source('dosm', 'DOSM district population', 'https://data.gov.my/data-catalogue/population_district',
         'CC BY 4.0', 'loaded', 1, 'District context shared by the two Kuala Lumpur walking areas.'));
     if (area === 'um-campus') {

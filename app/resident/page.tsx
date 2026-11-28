@@ -590,8 +590,8 @@ function ResidentPageContent() {
     },[remoteRoutineFeeds,walkingData,conditionFetchedAt,area,edges,hazards,reports,communityRoutes,conditionUnavailable,deviceHazards]);
     const routineAttention=useMemo(()=>library.packs.filter(pack=>pack.routine?.enabled &&
         inspectRoutine(pack,routineFeeds[pack.area_id??'elmina'],planningNow).changes.length>0).length,[library.packs,routineFeeds,planningNow]);
-    const planningSnapshot = useMemo(() => walkingData && nodes.length ? { nodes, edges, walking: walkingData, hazards, shade: shadeData } : null,
-        [nodes, edges, walkingData, hazards, shadeData]);
+    const planningSnapshot = useMemo(() => walkingData && nodes.length ? { nodes, edges, walking: walkingData, hazards, shade: shadeData, weather } : null,
+        [nodes, edges, walkingData, hazards, shadeData, weather]);
     const selectedCommunity = communityRoutes.find(route => route.id === communityId);
     const journeyCommand: SearchCommand | null = step !== 'route' ? null : errands
         ? {type:'errands',input:toolRequest,errands,feels_like:forecast?.feels_like_c}
@@ -1614,7 +1614,7 @@ function ResidentPageContent() {
                 </div>}
 
                 {walkSession && <div className="tg-recorder" hidden={view !== 'walk'}>
-                    <WalkRecorder key={walkSession.id} session={walkSession} language={language} voiceEnabled={prefs.speak && view === 'walk'} onComplete={finishRecording} onFeedback={saveFeedback} onPosition={setLivePoint}
+                    <WalkRecorder key={walkSession.id} session={walkSession} language={language} voiceEnabled={prefs.speak && view === 'walk'} vibrationEnabled={prefs.vibrate&&view==='walk'} onComplete={finishRecording} onFeedback={saveFeedback} onPosition={setLivePoint}
                         onShareShortcut={walkingData?.dataset_id ? walk => { setShortcutWalk(walk); setShowCommunity(true); } : undefined}
                         panelControl={!pickingHazard && <PanelGrip state={panelState} language={language} controls="walk-recording-controls"
                             openLabel={activeWalkReports.length ? 'Conditions changed' : 'Walk controls'} onChange={setPanelState} />}

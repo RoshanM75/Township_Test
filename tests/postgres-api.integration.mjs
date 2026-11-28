@@ -204,6 +204,11 @@ test('Next.js APIs with real PostgreSQL/PostGIS', { timeout: 60000 }, async (t) 
             assert.equal((await save({ ...observation, attributes: { clear_width_m: 1.25 } })).status, 201);
             assert.equal((await save({ ...observation, attributes: { clear_width_m: 0 } })).status, 400);
             assert.equal((await save({ ...observation, attributes: { audible_signal: true } })).status, 400);
+            const infrastructure=await save({...observation,attributes:{tactile_continuous:true,level_connection_checked:true,deck_height_m:4.2,step_count:12,opening_hours:'Mo-Fr 09:00-17:00'}});
+            assert.equal(infrastructure.status,201);
+            assert.equal((await request('/api/walking-data')).body.verifications.find(v=>v.id===infrastructure.body.id).attributes.deck_height_m,4.2);
+            assert.equal((await save({...observation,attributes:{deck_height_m:999}})).status,400);
+            assert.equal((await save({...observation,attributes:{step_count:3.5}})).status,400);
             assert.equal((await save({ ...observation, attributes: { medical_risk_score: 99 } })).status, 400);
             const facility = data.assets.find(a => a.kind === 'rest');
             assert.equal((await save({ ...observation, target_type: 'facility', target_id: facility.id, attributes: { has_seat: true, path_connection: true, available: true, opening_hours: '24/7' } })).status, 201);

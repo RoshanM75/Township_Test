@@ -20,6 +20,7 @@
     "data:rebuild": "node scripts/refresh-pilot.mjs --offline --osm-file data/pasar-seni/source/pasar-seni-osm.json.gz --population-file data/pasar-seni/source/population_district.csv.gz",
     "data:expand:kl": "node scripts/expand-kl-map.mjs",
     "data:refresh:um": "node scripts/refresh-um-campus.mjs",
+    "data:map": "node scripts/build-map-area.mjs",
     "data:details": "node scripts/refresh-walking-details.mjs",
     "data:rebuild:um": "node scripts/refresh-um-campus.mjs --osm-file data/um-campus/source/um-campus-osm.json.gz",
     "gis:export": "node scripts/export-gis.mjs",

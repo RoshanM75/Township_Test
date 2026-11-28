@@ -122,7 +122,7 @@ function linearProperties(tags){
         return {kind:'street',road:['arterial','primary','secondary','collector'].includes(roadClass)?'major':'local',roadClass,structure:grade};
     }
     if(footways.has(highway)){
-        const covered=['yes','arcade','shelter','colonnade'].includes(tags.covered)||['building_passage','covered'].includes(tags.tunnel);
+        const covered=tags.covered!=='no'&&(['yes','arcade','shelter','colonnade'].includes(tags.covered)||['building_passage','covered'].includes(tags.tunnel));
         const pathType=highway==='steps'?'steps':highway==='crossing'||tags.footway==='crossing'||tags.crossing?'crossing':covered?'covered':highway==='corridor'?'corridor':['cycleway','track','bridleway'].includes(highway)?'shared':'footway';
         const restricted=['no','private','customers'].includes(tags.foot)||(!['yes','designated','permissive'].includes(tags.foot)&&['no','private','customers'].includes(tags.access));
         return {kind:'path',pathType,structure:grade,covered,restricted,...(tags.surface?{surface:text(tags.surface)}:{}),...(tags.level?{level:text(tags.level)}:{})};
@@ -132,7 +132,7 @@ function linearProperties(tags){
 }
 const featureOf=(element,geometry,properties)=>{
     const name=nameOf(element.tags??{});
-    return {type:'Feature',geometry,properties:{...properties,osmRef:`${element.type}/${element.id}`,...(name?{name,mapName:mapText(name)}:{})}};
+    return {type:'Feature',geometry,properties:{...properties,osmRef:`${element.type}/${element.id}`,...(element.sourceDate?{sourceDate:element.sourceDate}:{}),...(name?{name,mapName:mapText(name)}:{})}};
 };
 export function shapeFeature(element, geometry){
     const tags=element.tags??{};

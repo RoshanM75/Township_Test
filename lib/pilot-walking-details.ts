@@ -16,7 +16,12 @@ export function withMappedDetails(edges: PathEdge[], walking: WalkingData, conte
     const details = context.walking_details;
     if (!details || walking.dataset_id !== context.dataset_id) return { edges, walking };
     return {
-        edges: edges.map(edge => Object.hasOwn(details.paths, edge.id) ? { ...edge, ...details.paths[edge.id] } : edge),
+        edges: edges.map(edge => {
+            const detail=details.paths[edge.id];if(!detail)return edge;
+            const merged={...edge,...detail};
+            if(edge.shared_shade||edge.shade_source==='audited')Object.assign(merged,{shade_morning:edge.shade_morning,shade_midday:edge.shade_midday,shade_afternoon:edge.shade_afternoon,shade_source:edge.shade_source});
+            return merged;
+        }),
         walking: {
             ...walking,
             assets: [...walking.assets.map(asset => Object.hasOwn(details.facilities, asset.id)
