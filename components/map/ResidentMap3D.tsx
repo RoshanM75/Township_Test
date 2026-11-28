@@ -144,7 +144,7 @@ function pin(map: LibreMap, position: [number, number], kind: string, symbol: st
 type Props = InteractiveMapProps & { area: PilotId; segments: EnvironmentSegment[]; onUnavailable: () => void };
 
 export default function ResidentMap3D({
-    area, segments, onUnavailable, startCoords = DEFAULT_ORIGIN, endCoords, endDetail, startLabel = 'Start', routes,
+    area, segments, onUnavailable, startCoords = DEFAULT_ORIGIN, endCoords, endDetail, startLabel = 'Start', routes, fitLabel,
     activeRouteId, reports, assets, liveLocation, focusLocation, reduceMotion, highContrast,
     selectedLocation, onLocationSelect, informationLayer, routeRoof = noRoof, labelScale = 1, language = 'en',
     solar, shadeAt, routeShade, describeAsset, onShadeReport,
@@ -153,6 +153,7 @@ export default function ResidentMap3D({
     const mapRef = useRef<LibreMap | null>(null);
     const deferredCamera = useRef<(() => void) | null>(null);
     const [loaded, setLoaded] = useState(false);
+    const [mapReady,setMapReady]=useState(false);
 
     useEffect(() => {
         if (!container.current) return;
@@ -171,6 +172,9 @@ export default function ResidentMap3D({
         map.addControl(new NavigationControl({ visualizePitch: true }), 'top-right');
         map.addControl(new AttributionControl({ compact: false }), 'bottom-left');
         map.once('style.load', () => setLoaded(true));
+        // A style can load before the large local GeoJSON is tiled. Do not
+        // leave users looking at a blank base without an explanation.
+        map.once('idle',()=>{if(mapRef.current===map)setMapReady(true);});
         map.once('webglcontextlost', onUnavailable);
         const el = container.current;
         const observer = new ResizeObserver(() => {
@@ -348,11 +352,12 @@ export default function ResidentMap3D({
 
     return (
         <>
-            <div ref={container} style={{ position: 'absolute', inset: 0 }} data-map-canvas />
+            <div ref={container} style={{ position: 'absolute', inset: 0 }} data-map-canvas data-map-ready={mapReady}/>
+            {!mapReady&&<div className="tg-map-loading" role="status"><span className="tg-map-spinner" aria-hidden/>{residentText(language,'Loading detailed map…')}</div>}
             {loaded && <button type="button" className="tg-map-fit" onClick={() => mapRef.current?.fitBounds(fit, {
                 padding: { top: 54, left: 35, right: 45, bottom: 65 }, maxZoom: 17.8,
                 duration: reduceMotion ? 0 : 330,
-            })}><Crosshair size={17} aria-hidden /> {residentText(language, 'Recenter')}</button>}
+            })} aria-label={fitLabel??residentText(language,'Recenter')}><Crosshair size={17} aria-hidden /><span>{fitLabel??residentText(language,'Recenter')}</span></button>}
         </>
     );
 }

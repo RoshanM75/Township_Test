@@ -120,12 +120,15 @@ export default function WalkRecorder({ session, onComplete, onFeedback, onPositi
                 <Navigation size={23} aria-hidden />
                 <div><p>{paused ? session.pack.title : `${t(stepIndex > 0 ? 'Next on your route' : 'First step')} · ${residentPlaceName(session.pack.route.destination)}`}</p><h1>{cue}</h1></div>
             </div>
+            <div className="tg-walk-live-metric">
+                <strong aria-label={t('Active time')}>{Math.floor(elapsed/60000)}:{String(Math.floor(elapsed/1000)%60).padStart(2,'0')}</strong>
+                <small>{t('Active time')}{track.distance_m>0?' · '+Math.round(track.distance_m)+' m':''}</small>
+            </div>
             <button className="tg-btn tg-btn-primary" onClick={() => paused ? resume() : pause()}>{paused ? <Play size={20} aria-hidden /> : <Pause size={20} aria-hidden />}{t(paused ? 'Resume walk' : 'Pause walk')}</button>
             {panelControl}
         </div>
         <div id="walk-recording-controls" className="tg-panel-body tg-stack">
-            <p className="tg-note tg-walk-time"><strong aria-label={t('Active time')}>{Math.floor(elapsed / 60000)}:{String(Math.floor(elapsed / 1000) % 60).padStart(2, '0')}</strong> {t('Active time')}
-                {track.distance_m > 0 && <span> · {Math.round(track.distance_m)} m {t('GPS distance')}</span>}</p>
+            {track.distance_m>0&&<p className="tg-note">{Math.round(track.distance_m)} m {t('GPS distance')}</p>}
             <p className="tg-small">{t('Planned walk')} · {Math.ceil(session.pack.route.total_min)} min · {Math.round(session.pack.route.length_m)} m</p>
             <p className="tg-small" role="status">{message}</p>
             <button className="tg-btn" onClick={() => {

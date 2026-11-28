@@ -35,7 +35,7 @@ export default function JourneyReadiness({ route, readiness, language = 'en', fe
     onCheck: (barrier: RouteBarrier) => void; onFocus: (point: [number, number]) => void;
 }) {
     const t = (value: Parameters<typeof residentText>[1]) => residentText(language, value);
-    const needsReview = readiness.incomplete || unavailable || warning;
+    const needsReview = readiness.incomplete || unavailable || warning || snapshot;
     return <section className="tg-reliability-card" aria-label={t('Journey readiness')}>
         <div className="tg-reliability-line">
             <h3 className="tg-h2 flex items-center gap-2">{needsReview ? <AlertTriangle size={20} aria-hidden /> : <ShieldCheck size={20} aria-hidden />}{t('Journey readiness')}</h3>

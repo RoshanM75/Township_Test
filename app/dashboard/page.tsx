@@ -8,13 +8,14 @@ import { useRouter,useSearchParams } from 'next/navigation';
 import type { MouseEvent } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
+import '../workspace.css';
 import MaintenanceImpact from '@/components/operator/MaintenanceImpact';
 import { CONDITION_LABELS } from '@/lib/route-conditions';
 import PreviewNotice from '@/components/walking/PreviewNotice';
-import { IS_PAGES_PREVIEW } from '@/lib/site';
+import { IS_PAGES_PREVIEW,sitePath } from '@/lib/site';
 import {
     Footprints, AlertTriangle, AlertCircle, Lightbulb, Sun, Accessibility,
-    MapPin, RefreshCw, Check, X, ClipboardList, Wallet,
+    MapPin, RefreshCw, Check, X, ClipboardList, Wallet, BarChart3, ShieldCheck, Wrench, ArrowUpRight,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { loadReports, checkReport, markReportFixed, loadWalkingData } from '@/lib/api';
@@ -89,18 +90,10 @@ function RankBadge({ rank, severity }: { rank: number; severity: 'blocker' | 'co
 }
 
 function Kpi({ Icon, label, value, sub }: { Icon: LucideIcon; label: string; value: string; sub: string }) {
-    return (
-        <div className="bg-white rounded-2xl p-4 border border-slate-200/70 shadow-sm flex items-start gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#A4262C]/10 flex items-center justify-center flex-shrink-0">
-                <Icon className="w-5 h-5 text-[#A4262C]" aria-hidden />
-            </div>
-            <div className="min-w-0">
-                <p className="text-xs font-semibold text-slate-600">{label}</p>
-                <p className="text-2xl font-extrabold text-slate-900 tabular-nums leading-tight">{value}</p>
-                <p className="text-xs text-slate-500">{sub}</p>
-            </div>
-        </div>
-    );
+    return <article className="tg-work-kpi">
+        <div><span>{label}</span><Icon size={21} aria-hidden/></div>
+        <strong>{value}</strong><small>{sub}</small>
+    </article>;
 }
 
 export default function AdminDashboardPage() {
@@ -344,52 +337,44 @@ function DashboardWorkspace({area}:{area:PilotId}) {
     /* ---------------- Render ---------------- */
 
     return (
-        <div className="min-h-screen bg-[#f8f5f5] text-slate-800 font-sans pb-10">
-            <div className="mx-auto max-w-7xl px-4"><PreviewNotice area={area}/></div>
-            {/* Header */}
-            <header className="bg-white border-b border-slate-200/80 border-t-4 border-t-[#A4262C] px-4 sm:px-8 py-3 flex flex-wrap items-center justify-between gap-3 sticky top-0 z-50">
-                <h1 className="text-xl font-extrabold tracking-tight text-slate-900 flex flex-wrap items-center gap-2">
-                    TownshipGo <span className="text-slate-300 font-normal">◆</span> <span className="text-slate-500 font-semibold text-base">Command Center</span>
-                </h1>
-                <div className="flex flex-wrap items-center gap-3">
-                    <Link href={`/resident?area=${area}`} className="inline-flex min-h-11 items-center text-sm font-bold text-[#7F1D22] underline">Walking planner</Link>
-                    <Link href={`/verification?area=${area}`} className="inline-flex min-h-11 items-center text-sm font-bold text-[#7F1D22] underline">Verification records</Link>
-
-                    <span className="text-xs text-slate-500">
-                        {IS_PAGES_PREVIEW ? 'Snapshot preview' : lastUpdated
-                            ? `Updated ${lastUpdated.toLocaleTimeString('en-MY', { hour: '2-digit', minute: '2-digit' })} · refreshes every 30 s`
-                            : 'Loading…'}
-                    </span>
-                    <button
-                        onClick={() => { setLoading(true); setRefreshVersion((value) => value + 1); }}
-                        disabled={loading}
-                        className="flex min-h-11 items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#A4262C]"
-                    >
-                        <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} aria-hidden />
-                        Refresh
-                    </button>
+        <div className="tg-workspace min-h-screen font-sans pb-10">
+            <header className="tg-work-header">
+                <div className="tg-work-header-inner">
+                    <Link href="/" className="tg-work-brand"><span><Footprints size={22} aria-hidden/></span>TownshipGo</Link>
+                    <span className="tg-work-label">Operator workspace</span>
+                    <nav className="tg-work-header-links" aria-label="Workspace links">
+                        <Link href={`/resident?area=${area}`}>Walking planner<ArrowUpRight size={15} aria-hidden/></Link>
+                        <Link href={`/verification?area=${area}`}>Verification records</Link>
+                    </nav>
                 </div>
             </header>
-
             {loadError && (
                 <div role="alert" className="bg-amber-50 border-b border-amber-300 text-amber-900 text-sm font-semibold px-8 py-2">
                     {loadError}
                 </div>
             )}
 
-            <main className="max-w-[1500px] mx-auto px-4 sm:px-6 mt-6 space-y-6">
-                <PilotSelector area={area} onChange={next=>router.replace(`?area=${next}`)}/>
+            <main className="max-w-[1500px] mx-auto px-4 sm:px-6 mt-5 space-y-5">
+                <div className="tg-work-title">
+                    <div><p className="tg-work-kicker">Neighbourhood operations</p><h1>Walking network overview</h1>
+                        <p>Review local conditions and prioritise the improvements that matter.</p></div>
+                    <div className="tg-work-toolbar">
+                        <PilotSelector area={area} onChange={next=>router.replace(`?area=${next}`)}/>
+                        <button type="button" disabled={loading} className="tg-work-refresh" onClick={()=>{setLoading(true);setRefreshVersion(value=>value+1);}}><RefreshCw className={loading?'animate-spin':''} size={17} aria-hidden/>Refresh</button>
+                        <span className="tg-work-feed">{IS_PAGES_PREVIEW?'Snapshot preview':lastUpdated?`Updated ${lastUpdated.toLocaleTimeString('en-MY',{timeZone:'Asia/Kuala_Lumpur',hour:'2-digit',minute:'2-digit'})} MYT · updates every 30 s`:'Loading…'}</span>
+                    </div>
+                </div>
+                <PreviewNotice area={area}/>
+
                 {!IS_PAGES_PREVIEW && <ReviewerAccess reviewerKey={reviewerKey} onKey={key => {
                     setReviewerKey(key);
                     if (!key) { setTeamFilter(''); setOverdueOnly(false); setCaseStatus('all'); }
                 }} />}
-                <nav aria-label="Operator workspace" className="flex flex-wrap gap-2">
-                    {([['cases', 'Maintenance queue'], ['activity', 'Activity and exports'], ['targets', 'Access and responsibility'], ['impact','Maintenance impact']] as const)
-                        .map(([value, label]) => <button type="button" key={value} aria-pressed={section === value} onClick={() => {
-                            setSection(value);
-                            if (value === 'targets') setFocusTarget(undefined);
-                        }} className={`min-h-11 rounded-lg border border-slate-300 px-3 text-sm font-bold ${section === value
-                            ? 'bg-slate-900 text-white' : 'bg-white text-slate-800'}`}>{label}</button>)}
+                <nav aria-label="Operator workspace" className="tg-work-tabs">
+                    {([{value:'cases',label:'Maintenance queue',short:'Queue',Icon:ClipboardList},{value:'activity',label:'Activity and exports',short:'Activity',Icon:BarChart3},
+                        {value:'targets',label:'Access and responsibility',short:'Access records',Icon:ShieldCheck},{value:'impact',label:'Maintenance impact',short:'Repair impact',Icon:Wrench}] as const)
+                        .map(({value,label,short,Icon})=><button type="button" key={value} aria-label={label} aria-pressed={section===value} onClick={()=>{setSection(value);if(value==='targets')setFocusTarget(undefined);}}>
+                            <Icon size={20} strokeWidth={1.8} aria-hidden/><span>{short}</span></button>)}
                 </nav>
                 {section !== 'cases' && section !== 'impact' && !operatorKey && <p className="rounded-xl border border-slate-300 bg-white p-4">
                     {IS_PAGES_PREVIEW ? 'Live operator tools are available on the server app.' : 'Enter the reviewer key to open this workspace.'}
@@ -402,12 +387,12 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                 {section === 'cases' && <>
                 <PilotSources area={area}/>
                 {/* KPI strip */}
-                <section aria-label="Key figures" className="grid grid-cols-1 min-[480px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
-                    <Kpi Icon={ClipboardList} label="Open cases" value={metrics.open.toLocaleString()} sub="Waiting for a check or fix" />
-                    <Kpi Icon={AlertTriangle} label="Critical blockers" value={metrics.blockers.toLocaleString()} sub="Stop some people walking" />
-                    <Kpi Icon={Wallet} label="Backlog cost" value={`RM ${metrics.cost.toLocaleString()}`} sub="Estimated, all open defects" />
+                <section aria-label="Key figures" className="tg-work-kpis">
+                    <Kpi Icon={ClipboardList} label="Open cases" value={IS_PAGES_PREVIEW?'—':metrics.open.toLocaleString()} sub={IS_PAGES_PREVIEW?'Shared cases unavailable':'Waiting for a check or fix'} />
+                    <Kpi Icon={AlertTriangle} label="Critical blockers" value={IS_PAGES_PREVIEW?'—':metrics.blockers.toLocaleString()} sub={IS_PAGES_PREVIEW?'Requires live case data':'Stop some people walking'} />
+                    <Kpi Icon={Wallet} label="Backlog cost" value={IS_PAGES_PREVIEW?'—':`RM ${metrics.cost.toLocaleString()}`} sub={IS_PAGES_PREVIEW?'Requires live case data':'Estimated, all open defects'} />
                     <Kpi Icon={Footprints} label="Mapped places" value={dataCounts.places.toLocaleString()} sub="Recorded destinations & stops" />
-                    <Kpi Icon={ClipboardList} label="Unassigned cases" value={metrics.unassigned.toLocaleString()} sub="Open cases awaiting a team" />
+                    <Kpi Icon={ClipboardList} label="Unassigned cases" value={IS_PAGES_PREVIEW?'—':metrics.unassigned.toLocaleString()} sub="Open cases awaiting a team" />
                 </section>
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -422,7 +407,7 @@ function DashboardWorkspace({area}:{area:PilotId}) {
                                 </span>
                             </div>
                             <div className="absolute inset-2 rounded-xl overflow-hidden">
-                                <InteractiveMap
+                                <InteractiveMap localBasemap={sitePath(`/map-area/${area}.geojson`)}
                                     pins={pins}
                                     selectedPinId={selectedItem ? String(selectedItem.id) : null}
                                     focusLocation={selectedItem ? undefined : location}

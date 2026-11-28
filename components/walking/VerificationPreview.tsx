@@ -2,6 +2,7 @@
 import { useEffect, useState,Suspense } from 'react';
 import { useRouter,useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import '../../app/workspace.css';
 import { loadWalkingData,loadPilotContext } from '@/lib/api';
 import type { WalkingData } from '@/lib/walking';
 import { placeSearchText } from '@/lib/walking';
@@ -20,12 +21,12 @@ function PreviewContent({area}:{area:PilotId}) {
     const [error, setError] = useState('');
     useEffect(() => { Promise.all([loadWalkingData(area),loadPilotContext(area)]).then(([d,c])=>{setData(d);setContext(c);}).catch(() => setError('The mapped places could not be loaded. Please reload this page.')); }, [area]);
     const shown=data?.assets.filter(a=>(kind==='all'||a.kind===kind)&&(!query||placeSearchText(a).includes(query.toLowerCase())))??[];
-    return <main className="min-h-screen bg-slate-50 px-4 py-8 font-sans text-slate-900">
+    return <main className="tg-workspace min-h-screen px-4 py-6 font-sans">
         <div className="mx-auto max-w-3xl space-y-6">
-            <h1 className="text-3xl font-extrabold">Mapped places and verification coverage</h1>
+            <div className="tg-work-title"><div><p className="tg-work-kicker">TownshipGo · Path information</p><h1>Mapped places and verification coverage</h1><p>Explore the evidence behind the walking map.</p></div></div>
             <PilotSelector area={area} onChange={next=>router.replace(`?area=${next}`)}/>
             <PreviewNotice area={area}/>
-            <nav className="flex flex-wrap gap-4 font-bold text-[#7F1D22] underline"><Link href={`/resident?area=${area}`}>Plan a walk</Link><Link href="/">TownshipGo home</Link></nav>
+            <nav className="tg-work-header-links"><Link href={`/resident?area=${area}`}>Plan a walk</Link><Link href="/">TownshipGo home</Link></nav>
             <p>{PILOTS[area].description} Mapped records and GIS-estimated approaches are separate from field checks. Required rest intervals need currently checked facilities.</p>
             {error && <p role="alert">{error}</p>}
             {!data && !error && <p role="status">Loading mapped places…</p>}

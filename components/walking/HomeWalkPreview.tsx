@@ -22,14 +22,14 @@ export default function HomeWalkPreview({area=DEFAULT_PILOT}:{area?:PilotId}) {
     }, [area]);
     const featured=(data?.graph.source.featured_ids??[]).map(id=>data?.walking.assets.find(a=>a.id===id)).filter(a=>a!==undefined);
     const place = area==='elmina'?data?.walking.assets.find(a => a.external_id === DESTINATIONS[0].id)
-        :area==='pasar-seni'?(featured.find(a=>a.kind==='transit')??featured[0]):featured[0];
+        :area==='pasar-seni'?(featured.find(a=>a.kind==='destination'&&a.category!=='transport')??featured[0]):featured[0];
     const origin=data?.graph.source.origin?.coordinates??PILOTS[area].centre;
     const snapshot=useMemo(()=>data?{nodes:data.graph.nodes,edges:data.graph.edges,walking:data.walking,hazards:data.hazards}:null,[data]);
     const search=usePlannerResult<JourneyPlan>(snapshot,place&&data?{type:'journey',input:{origin,destination:place,profile:'senior',needs:DEFAULT_NEEDS,departure_at:data.walking.as_of}}:null);
     const route=search.result?.routes.direct;
     const params=new URLSearchParams({area,...(place?{destId:place.external_id||place.id,startLat:String(origin[0]),startLng:String(origin[1])}:{})});
-    return <section aria-label={`${PILOTS[area].short_name} walking preview`} className="relative isolate overflow-hidden rounded-[2rem] border border-[#d3ddd6] bg-[#e8eee8] shadow-[0_18px_60px_rgba(31,58,43,.10)]">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#d3ddd6] bg-white/95 px-5 py-4">
+    return <section aria-label={`${PILOTS[area].short_name} walking preview`} className="relative isolate overflow-hidden rounded-[1.4rem] border border-[#dedbd5] bg-[#e8eee8] shadow-[0_8px_32px_rgba(39,35,43,.09)]">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#dedbd5] bg-[#fffefa] px-5 py-4">
             <div className="flex items-center gap-2 text-sm font-bold text-[#254c3c]"><MapPin size={18} className="shrink-0" aria-hidden />{area==='elmina'?'A walk around Elmina':area==='um-campus'?'Explore UM campus':'Explore Pasar Seni on foot'}</div>
             <span className="rounded-full border border-[#d5dfd5] bg-[#f3f6f1] px-3 py-1 text-xs font-semibold text-[#3f5a49]">Pedestrian network</span>
         </div>
@@ -39,7 +39,7 @@ export default function HomeWalkPreview({area=DEFAULT_PILOT}:{area?:PilotId}) {
                 activeRouteId="direct" reduceMotion />
                 : <div role="status" className="flex h-full items-center justify-center px-8 text-center text-sm text-[#3f5a49]">{error ? 'The map preview is unavailable. You can still open the walking planner.' : 'Loading the local pedestrian network…'}</div>}
         </div>
-        <div className="relative border-t border-[#d3ddd6] bg-white p-5">
+        <div className="relative border-t border-[#dedbd5] bg-[#fffefa] p-5">
             <div className="mb-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600"><span className="rounded-full bg-[#edf5f1] px-2 py-1 text-emerald-900">{area==='elmina'?'Example walk':PILOTS[area].short_name}</span>Profile pace · conditions need checking</div>
             <h2 className="text-lg font-extrabold text-[#24392f]">{place?.name || (area==='elmina'?DESTINATIONS[0].name:PILOTS[area].name)}</h2>
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3">

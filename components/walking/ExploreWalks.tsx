@@ -1,14 +1,14 @@
 'use client';
 import { useMemo, useState } from 'react';
-import { Armchair, Umbrella, Droplets, Toilet, RotateCcw } from 'lucide-react';
+import { Armchair, Umbrella, Droplets, Toilet } from 'lucide-react';
 import { findFacilities, FACILITY_LABELS, type FacilityKind } from '@/lib/walk-tools';
 import { usePlannerResult } from '@/lib/use-planner';
 import { metres } from '@/lib/walking-geometry';
 import type { PlanningInput, WalkingData, WalkingAsset } from '@/lib/walking';
 import type { PathEdge, PathNode, HazardReport } from '@/lib/routing';
 
-export default function ExploreWalks({ nodes, edges, data, request, hazards, onChoose, onReturn, onLocate, locating, locationLabel, locationMessage, onLastPosition }: { nodes: PathNode[]; edges: PathEdge[]; data: WalkingData | null;
-    request: Omit<PlanningInput, 'destination' | 'entrance_id'>; hazards: HazardReport[]; onChoose: (a: WalkingAsset) => void; onReturn: (minutes: number) => void;
+export default function ExploreWalks({ nodes, edges, data, request, hazards, onChoose, onLocate, locating, locationLabel, locationMessage, onLastPosition }: { nodes: PathNode[]; edges: PathEdge[]; data: WalkingData | null;
+    request: Omit<PlanningInput, 'destination' | 'entrance_id'>; hazards: HazardReport[]; onChoose: (a: WalkingAsset) => void;
     onLocate: () => void; locating: boolean; locationLabel: string; locationMessage: string | null; onLastPosition?: () => void }) {
     const [kind, setKind] = useState<FacilityKind>('rest');
     const [unmatched, setUnmatched] = useState(false);
@@ -19,14 +19,6 @@ export default function ExploreWalks({ nodes, edges, data, request, hazards, onC
     const items=search.result??[];
     const icons = { rest: Armchair, shelter: Umbrella, water: Droplets, toilet: Toilet };
     return <div className="tg-stack">
-        <h1 className="tg-h2">What would help your walk?</h1>
-        <section className="rounded-2xl border border-emerald-200 bg-[#edf5f1] p-4 text-slate-900">
-            <h2 className="flex items-center gap-2 font-bold"><RotateCcw size={20} aria-hidden />A walk that brings you back</h2>
-            <p className="mt-2 text-sm">Start and finish in the same place. Your budget includes the return, crossing waits and required rests.</p>
-            <div className="mt-3 grid grid-cols-2 gap-2">{[15,30].map(n => <button className="tg-btn" key={n} disabled={!data} onClick={() => onReturn(n)}>Up to {n} min</button>)}</div>
-            <p className="mt-2 text-xs">Some paths may be retraced. Your walking requirements still apply.</p>
-        </section>
-        <h2 className="tg-h2 mt-2">Find a facility</h2>
         <p className="tg-small">Routes start from your planning location and use your walking needs. Mapped facilities may still need checking.</p>
         <div className="rounded-xl border border-slate-300 p-3"><p className="text-sm">From <strong>{locationLabel}</strong></p><button className="tg-btn mt-2" disabled={locating} onClick={onLocate}>{locating ? 'Finding your location…' : 'Search near my location'}</button>{onLastPosition && <button className="mt-2 min-h-11 text-sm font-bold underline" onClick={onLastPosition}>Use my last recorded GPS position</button>}{locationMessage&&<p className="mt-2 text-sm" role="status">{locationMessage}</p>}</div>
         <div className="grid grid-cols-2 gap-2" role="group" aria-label="Facility type">{(Object.keys(FACILITY_LABELS) as FacilityKind[]).map(value => {

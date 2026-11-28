@@ -1,8 +1,8 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useCallback, useMemo, useRef, useState } from 'react';
-import { Box, ChevronDown, Layers, Map as MapIcon, MapPin } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Box, Layers, Map as MapIcon, MapPin } from 'lucide-react';
 import { sitePath } from '@/lib/site';
 import type { PilotId, PilotNeighbourhood } from '@/lib/pilots';
 import { environmentCoverage, environmentSegments, type EnvironmentLayer } from '@/lib/environment';
@@ -26,7 +26,12 @@ export default function ResidentMap({
     const [failed, setFailed] = useState(false);
     const fallback = useCallback(() => setFailed(true), []);
     const mode = failed ? '2d' : mapMode ?? localMode;
-    const MapModeIcon = mode === '3d' ? Box : MapIcon;
+    useEffect(()=>{
+        const close=(event:PointerEvent)=>{if(menu.current?.open&&!menu.current.contains(event.target as Node))menu.current.open=false;};
+        const escape=(event:KeyboardEvent)=>{if(event.key==='Escape'&&menu.current?.open){menu.current.open=false;menu.current.querySelector('summary')?.focus();}};
+        document.addEventListener('pointerdown',close);document.addEventListener('keydown',escape);
+        return()=>{document.removeEventListener('pointerdown',close);document.removeEventListener('keydown',escape);};
+    },[]);
     const { edges, records, at } = mapProps.environment ?? {};
     const segments = useMemo(() => informationLayer !== 'routes' && edges && records && at
         ? environmentSegments(edges, records, at, informationLayer, mapProps.solar) : [],
@@ -47,22 +52,18 @@ export default function ResidentMap({
                     localBasemap={sitePath(`/map-area/${area}.geojson`)} />
                 : <Map3D {...mapProps} language={language} area={area} segments={segments} informationLayer={informationLayer} onUnavailable={fallback} />}
             <div className="tg-map-controls">
-                <label className="tg-map-choice tg-map-view">
-                    <MapModeIcon size={17} aria-hidden />
-                    <span className="sr-only">{t('Map view')}</span>
-                    <select value={mode} onChange={event => changeMode(event.target.value as MapMode)}>
-                        <option value="3d">3D</option>
-                        <option value="2d">2D</option>
-                    </select>
-                    <ChevronDown size={14} aria-hidden />
-                </label>
+                <div className="tg-map-mode-switch" role="group" aria-label={t('Map view')}>
+                    <button type="button" aria-pressed={mode==='2d'} onClick={()=>changeMode('2d')} title={t('2D map')}><MapIcon size={16} aria-hidden/>2D</button>
+                    <button type="button" aria-pressed={mode==='3d'} onClick={()=>changeMode('3d')} title={t('3D map')}><Box size={16} aria-hidden/>3D</button>
+                </div>
                 {(mapProps.environment || !!neighbourhoods?.length) && <details className="tg-map-settings" ref={menu}>
-                    <summary className="tg-map-choice" aria-label={t('Map options')}><Layers size={18} aria-hidden /><span>{t('Map options')}</span></summary>
+                    <summary className="tg-map-choice" aria-label={t('Map options')} data-active={informationLayer!=='routes'}><Layers size={18} aria-hidden /><span>{t('Layers')}</span></summary>
                     <div className="tg-map-settings-panel">
                         {mapProps.environment && <label>
                             {t('Map information')}
                             <select value={informationLayer} onChange={event => {
                                 onInformationLayerChange?.(event.target.value as EnvironmentLayer | 'routes');
+                                if(menu.current)menu.current.open=false;
                             }}>
                                 {([['routes', 'Routes'], ['paths', 'Footpaths'], ['cover', 'Roof cover'], ['shade', 'Shade estimates and checks'],
                                     ['lighting', 'Lighting'], ['observations', 'Field checks']] as const).map(([id, label]) =>

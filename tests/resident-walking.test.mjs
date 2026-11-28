@@ -10,7 +10,7 @@ test('resident search distinguishes the Pasar Seni stations, NU Sentral and both
         .filter(asset => ['destination', 'transit'].includes(asset.kind));
     const connected = new Set(bundle.walking.assets.filter(asset => asset.edge_id !== null).map(asset => asset.parent_id ?? asset.id));
     const first = query => searchResidentPlaces(places, query, bundle.context.featured_ids, connected)[0];
-    for (const [query, title] of [['PASAR SENI MRT', 'Pasar Seni MRT'], ['LRT Pasar Seni', 'Pasar Seni LRT'],
+    for (const [query, title] of [['Central Market','Central Market'],['PASAR SENI MRT', 'Pasar Seni MRT'], ['LRT Pasar Seni', 'Pasar Seni LRT'],
         ['NU-Sentral', 'NU Sentral'], ['Pudu LRT', 'Pudu LRT'], ['Pudu Sentral', 'Pudu Sentral']]) {
         assert.equal(residentPlaceName(first(query)), title, query);
     }
