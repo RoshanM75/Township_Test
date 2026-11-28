@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Crosshair } from 'lucide-react';
 import {
-    Map as LibreMap, AttributionControl, LngLatBounds, Marker, NavigationControl, Popup,
-    type GeoJSONSource, type StyleSpecification, type MapMouseEvent, type SymbolLayerSpecification,
+    Map as LibreMap, AttributionControl, LngLatBounds, Marker, NavigationControl, Popup, ScaleControl,
+    type GeoJSONSource, type StyleSpecification, type MapMouseEvent,
 } from 'maplibre-gl';
 import type { Feature, FeatureCollection, LineString, Polygon } from 'geojson';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -15,24 +15,21 @@ import { DEFAULT_ORIGIN } from '@/lib/precinct';
 import { residentText } from '@/lib/resident-language';
 import { shadeLabel } from '@/lib/shade-display';
 import type { InteractiveMapProps } from './InteractiveMap';
+import { detailBaseLayers, detailBuildingLayers, detailLabelLayers, DETAIL_LABEL_LAYERS, INSPECT_BASE_LAYERS, labelSize } from './detailed-map-style';
+import { featureDescription, type MapProperties } from '@/lib/map-detail';
+import { attachTerrainLabels } from './terrain-labels';
 import { MAP_CAUTION, ROOF_COVER, ROUTE_ALTERNATIVE, ROUTE_OUTLINE, WALK_ROUTE, WALK_ROUTE_HC, mapFacilitySymbol } from './walking-map-theme';
 
 const empty: FeatureCollection = { type: 'FeatureCollection', features: [] };
 const noRoof: [number, number][][] = [];
 const lngLat = ([lat, lng]: [number, number]): [number, number] => [lng, lat];
-const layerIds = ['walking-conditions', 'walking-routes', 'place-labels', 'building-labels', 'street-labels'];
-const labelText = {
-    'text-font': ['Noto Sans Regular'],
-    'text-field': ['get', 'name'],
-    'text-padding': 4,
-} satisfies NonNullable<SymbolLayerSpecification['layout']>;
-const labelHalo = { 'text-halo-color': '#fffefa', 'text-halo-width': 1.25 } as const;
+const layerIds = ['walking-conditions', 'walking-routes', 'conditions-unknown'];
 
 function mapStyle(area: PilotId): StyleSpecification {
     return {
         version: 8,
         glyphs: sitePath('/map-fonts/{fontstack}/{range}.pbf'),
-        light: { anchor: 'map', color: '#fffaf0', intensity: 0.45, position: [1.8, 230, 42] },
+        light: { anchor: 'map', color: '#fffaf3', intensity: .47, position: [1.4, 220, 50] },
         sources: {
             area: { type: 'geojson', data: sitePath(`/map-area/${area}.geojson`),
                 attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>' },
@@ -43,31 +40,10 @@ function mapStyle(area: PilotId): StyleSpecification {
             'route-shade': { type: 'geojson', data: empty },
         },
         layers: [
-            { id: 'ground', type: 'background', paint: { 'background-color': '#f4f0e7' } },
-            { id: 'open-spaces', type: 'fill', source: 'area', filter: ['in', ['get', 'kind'], ['literal', ['green', 'water']]],
-                paint: { 'fill-color': ['match', ['get', 'kind'], 'water', '#b4d8ed', '#cfdfbc'] } },
-            { id: 'watercourses', type: 'line', source: 'area', filter: ['==', ['get', 'kind'], 'watercourse'],
-                paint: { 'line-color': '#99c6df', 'line-width': ['interpolate', ['linear'], ['zoom'], 13, 2, 18, 5] } },
-            { id: 'streets-outline', type: 'line', source: 'area', filter: ['==', ['get', 'kind'], 'street'],
-                layout: { 'line-cap': 'round', 'line-join': 'round' },
-                paint: { 'line-color': ['case', ['==', ['get', 'road'], 'major'], '#d7bc91', '#dcd6c8'],
-                    'line-width': ['interpolate', ['linear'], ['zoom'], 13, 3, 18, ['case', ['==', ['get', 'road'], 'major'], 16, 9]] } },
-            { id: 'streets', type: 'line', source: 'area', filter: ['==', ['get', 'kind'], 'street'],
-                layout: { 'line-cap': 'round', 'line-join': 'round' },
-                paint: { 'line-color': ['case', ['==', ['get', 'road'], 'major'], '#fae2b5', '#fffdfa'],
-                    'line-width': ['interpolate', ['linear'], ['zoom'], 13, 1.5, 18, ['case', ['==', ['get', 'road'], 'major'], 13, 6.5]] } },
-            { id: 'railways', type: 'line', source: 'area', filter: ['==', ['get', 'kind'], 'rail'],
-                paint: { 'line-color': '#797d87', 'line-width': 2, 'line-dasharray': [2, 1.5] } },
-            { id: 'reference-paths', type: 'line', source: 'area', minzoom: 15, filter: ['==', ['get', 'kind'], 'path'],
-                paint: { 'line-color': '#928273', 'line-width': 1.2, 'line-opacity': 0.57, 'line-dasharray': [2, 2] } },
-            { id: 'building-footprints', type: 'fill', source: 'area', filter: ['==', ['get', 'kind'], 'building'],
-                paint: { 'fill-color': '#ded5ca', 'fill-outline-color': '#bdb1a6' } },
+            ...detailBaseLayers().map(layer=>layer.minzoom===undefined?layer:{...layer,minzoom:Math.max(0,layer.minzoom-1)}),
             { id: 'ground-shadows', type: 'fill', source: 'cast-shadows', minzoom: 15.5,
                 paint: { 'fill-color': '#3f4a64', 'fill-opacity': .25, 'fill-antialias': false } },
-            { id: 'building-volumes', type: 'fill-extrusion', source: 'area', filter: ['==', ['get', 'kind'], 'building'], minzoom: 15, paint: {
-                'fill-extrusion-color': ['match', ['get', 'use'], 'civic', '#cbd4d5', 'commercial', '#d7cabd', '#d9d0c6'],
-                'fill-extrusion-height': ['get', 'height'], 'fill-extrusion-base': ['get', 'base'], 'fill-extrusion-opacity': 0.88,
-            } },
+            ...detailBuildingLayers().map(layer=>({...layer,minzoom:(layer.minzoom??1)-1})),
             { id: 'conditions-unknown', type: 'line', source: 'conditions', filter: ['!', ['get', 'known']], paint: {
                 'line-color': '#64748b', 'line-width': 2, 'line-opacity': 0.48, 'line-dasharray': [1, 2.5],
             } },
@@ -90,22 +66,7 @@ function mapStyle(area: PilotId): StyleSpecification {
                 layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['get', 'colour'], 'line-width': 5 } },
             { id: 'route-shade-unknown', type: 'line', source: 'route-shade', filter: ['==', ['get', 'condition'], 'unknown'],
                 paint: { 'line-color': '#64748b', 'line-width': 5, 'line-dasharray': [1, 1.5] } },
-            { id: 'street-labels', type: 'symbol', source: 'area', minzoom: 14.5,
-                filter: ['all', ['==', ['get', 'kind'], 'street'], ['has', 'name']],
-                layout: { ...labelText, 'symbol-placement': 'line', 'symbol-spacing': 250, 'text-max-angle': 35,
-                    'text-size': ['interpolate', ['linear'], ['zoom'], 15, 10, 18, 12] },
-                paint: { ...labelHalo, 'text-color': '#534d48' } },
-            { id: 'building-labels', type: 'symbol', source: 'area', minzoom: 17.2,
-                filter: ['all', ['==', ['get', 'kind'], 'label'], ['==', ['get', 'labelKind'], 'building']],
-                layout: { ...labelText, 'text-size': 11, 'text-max-width': 11, 'text-offset': [0, .1] },
-                paint: { ...labelHalo, 'text-color': '#474352' } },
-            { id: 'place-labels', type: 'symbol', source: 'area', minzoom: 14.5,
-                filter: ['all', ['==', ['get', 'kind'], 'label'], ['!=', ['get', 'labelKind'], 'building']],
-                layout: { ...labelText, 'text-size': ['interpolate', ['linear'], ['zoom'], 15, 11, 18, 13],
-                    'text-max-width': 11, 'text-variable-anchor': ['center', 'top', 'bottom'], 'text-radial-offset': .35,
-                    'symbol-sort-key': ['case', ['==', ['get', 'labelKind'], 'station'], 0, 1] },
-                paint: { ...labelHalo, 'text-color': ['match', ['get', 'labelKind'], 'station', '#1e5c78', 'green', '#466343', 'water', '#275c79', '#443650'] } },
-
+            ...detailLabelLayers().map(layer=>({...layer,minzoom:(layer.minzoom??1)-1})),
         ],
     };
 }
@@ -138,7 +99,7 @@ function pin(map: LibreMap, position: [number, number], kind: string, symbol: st
     element.setAttribute('aria-label', label);
     element.textContent = symbol;
     const popup = new Popup({ offset: 17, maxWidth: '245px' }).setDOMContent(popupContent(label, detail));
-    return new Marker({ element }).setLngLat(lngLat(position)).setPopup(popup).addTo(map);
+    return new Marker({ element, opacityWhenCovered: '1' }).setLngLat(lngLat(position)).setPopup(popup).addTo(map);
 }
 
 type Props = InteractiveMapProps & { area: PilotId; segments: EnvironmentSegment[]; onUnavailable: () => void };
@@ -147,7 +108,7 @@ export default function ResidentMap3D({
     area, segments, onUnavailable, startCoords = DEFAULT_ORIGIN, endCoords, endDetail, startLabel = 'Start', routes, fitLabel,
     activeRouteId, reports, assets, liveLocation, focusLocation, reduceMotion, highContrast,
     selectedLocation, onLocationSelect, informationLayer, routeRoof = noRoof, labelScale = 1, language = 'en',
-    solar, shadeAt, routeShade, describeAsset, onShadeReport,
+    solar, shadeAt, routeShade, describeAsset, onShadeReport, terrainDetail, showTerrain = true, showTerrainMesh = false,
 }: Props) {
     const container = useRef<HTMLDivElement>(null);
     const mapRef = useRef<LibreMap | null>(null);
@@ -161,8 +122,8 @@ export default function ResidentMap3D({
         try {
             map = new LibreMap({
                 container: container.current, style: mapStyle(area),
-                center: lngLat(PILOTS[area].centre), zoom: 17, pitch: 23, bearing: 0,
-                maxPitch: 70, maxZoom: 20, attributionControl: false,
+                center: lngLat(PILOTS[area].centre), zoom: 16.8, pitch: 40, bearing: 0,
+                maxPitch: 65, maxZoom: 21, attributionControl: false,
             });
         } catch {
             onUnavailable();
@@ -170,7 +131,8 @@ export default function ResidentMap3D({
         }
         mapRef.current = map;
         map.addControl(new NavigationControl({ visualizePitch: true }), 'top-right');
-        map.addControl(new AttributionControl({ compact: false }), 'bottom-left');
+        map.addControl(new AttributionControl({ compact: true }), 'bottom-left');
+        map.addControl(new ScaleControl({maxWidth:90,unit:'metric'}),'bottom-right');
         map.once('style.load', () => setLoaded(true));
         // A style can load before the large local GeoJSON is tiled. Do not
         // leave users looking at a blank base without an explanation.
@@ -207,15 +169,38 @@ export default function ResidentMap3D({
     useEffect(() => {
         const map = mapRef.current;
         if (!loaded || !map) return;
-        map.setLayoutProperty('street-labels', 'text-size', ['interpolate', ['linear'], ['zoom'], 15, 11 * labelScale, 18, 13 * labelScale]);
-        map.setLayoutProperty('building-labels', 'text-size', 12 * labelScale);
-        map.setLayoutProperty('place-labels', 'text-size', ['interpolate', ['linear'], ['zoom'], 15, 12 * labelScale, 18, 15 * labelScale]);
+        for(const id of DETAIL_LABEL_LAYERS)map.setLayoutProperty(id,'text-size',labelSize(id,labelScale));
+        for(const layer of detailLabelLayers())if(layer.type==='symbol')map.setPaintProperty(layer.id,'text-color',highContrast?'#232222':layer.paint?.['text-color']);
         for (const [selector, label] of [['zoom-in', 'Zoom in'], ['zoom-out', 'Zoom out']] as const) {
             const button = container.current?.querySelector(`.maplibregl-ctrl-${selector}`);
             button?.setAttribute('aria-label', residentText(language, label));
             button?.setAttribute('title', residentText(language, label));
         }
-    }, [loaded, labelScale, language]);
+    }, [loaded, labelScale, language,highContrast]);
+
+    useEffect(()=>{
+        const map=mapRef.current;if(!loaded||!map)return;
+        const activeTerrain=showTerrain&&terrainDetail;
+        if(activeTerrain&&!map.getSource('terrain-grid')){
+            map.addSource('terrain-grid',{type:'raster-dem',encoding:'terrarium',tiles:[sitePath(`/map-area/${area}-terrain/{z}/{x}/{y}.png`)],
+                bounds:terrainDetail.bounds,minzoom:terrainDetail.minzoom,maxzoom:terrainDetail.maxzoom,tileSize:terrainDetail.tileSize,
+                attribution:'<a href="https://open-meteo.com/en/docs/elevation-api">Copernicus DEM / Open-Meteo</a>'});
+            map.addLayer({id:'ground-relief',type:'hillshade',source:'terrain-grid',paint:{'hillshade-exaggeration':.24,
+                'hillshade-shadow-color':'#8c8073','hillshade-highlight-color':'#fff9e9','hillshade-accent-color':'#998b77'}},'terrain-contours');
+        }
+        if(activeTerrain&&showTerrainMesh){if(!map.getTerrain())map.setTerrain({source:'terrain-grid',exaggeration:1});}
+        else if(map.getTerrain())map.setTerrain(null);
+        for(const id of ['terrain-contours','contour-labels','ground-relief'])if(map.getLayer(id))map.setLayoutProperty(id,'visibility',activeTerrain?'visible':'none');
+    },[loaded,area,terrainDetail,showTerrain,showTerrainMesh]);
+
+    useEffect(()=>{
+        const map=mapRef.current;if(!loaded||!map)return;
+        // At very close zoom, the terrain depth buffer can hide MapLibre’s
+        // ground labels. Project a collision-filtered label overlay instead.
+        const mesh=showTerrain&&showTerrainMesh&&Boolean(terrainDetail);
+        for(const id of DETAIL_LABEL_LAYERS)map.setLayoutProperty(id,'visibility',mesh||id==='contour-labels'&&!showTerrain?'none':'visible');
+        if(mesh)return attachTerrainLabels(map,labelScale,highContrast);
+    },[loaded,showTerrain,showTerrainMesh,terrainDetail,labelScale,highContrast]);
 
     useEffect(() => {
         const map = mapRef.current;
@@ -232,7 +217,7 @@ export default function ResidentMap3D({
             if (focusLat !== undefined && focusLng !== undefined) {
                 map.easeTo({ center: lngLat([focusLat, focusLng]), zoom: Math.max(17, map.getZoom()), duration });
             } else {
-                map.fitBounds(fit, { padding: { top: 54, left: 35, right: 45, bottom: 65 }, maxZoom: 17.8,
+                map.fitBounds(fit, { padding: { top: 54, left: 35, right: 45, bottom: 65 }, maxZoom: 17.35,
                     duration, pitch: map.getPitch(), bearing: map.getBearing() });
             }
         };
@@ -336,8 +321,16 @@ export default function ResidentMap3D({
             const inspected = informationLayer === 'shade' ? map.queryRenderedFeatures(event.point, {
                 layers: ['route-shade-known', 'route-shade-unknown', 'walking-conditions', 'conditions-unknown'],
             })[0] : undefined;
-            const feature = inspected ?? map.queryRenderedFeatures(event.point, { layers: [...layerIds, 'conditions-unknown'] })[0];
-            if (!feature?.properties.name) return;
+            const routeFeature=inspected??map.queryRenderedFeatures(event.point,{layers:layerIds})[0];
+            const base=routeFeature?undefined:map.queryRenderedFeatures(event.point,{layers:INSPECT_BASE_LAYERS})[0];
+            const feature=routeFeature??base;
+            if(!feature)return;
+            if(base){
+                const {title,lines}=featureDescription(base.properties as MapProperties,language);
+                popup.setLngLat(event.lngLat).setDOMContent(popupContent(title,lines.join(' · '))).addTo(map);
+                return;
+            }
+            if(!feature.properties.name)return;
             const edge = inspected?.properties.edge;
             const action = onShadeReport && Number.isSafeInteger(edge) ? {
                 label: residentText(language, 'Report shade here'),
@@ -355,7 +348,7 @@ export default function ResidentMap3D({
             <div ref={container} style={{ position: 'absolute', inset: 0 }} data-map-canvas data-map-ready={mapReady}/>
             {!mapReady&&<div className="tg-map-loading" role="status"><span className="tg-map-spinner" aria-hidden/>{residentText(language,'Loading detailed map…')}</div>}
             {loaded && <button type="button" className="tg-map-fit" onClick={() => mapRef.current?.fitBounds(fit, {
-                padding: { top: 54, left: 35, right: 45, bottom: 65 }, maxZoom: 17.8,
+                padding: { top: 54, left: 35, right: 45, bottom: 65 }, maxZoom: 17.35,
                 duration: reduceMotion ? 0 : 330,
             })} aria-label={fitLabel??residentText(language,'Recenter')}><Crosshair size={17} aria-hidden /><span>{fitLabel??residentText(language,'Recenter')}</span></button>}
         </>

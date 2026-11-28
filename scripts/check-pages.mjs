@@ -45,6 +45,17 @@ for(const area of metadata.areas){
     const context=await read('context');assert.equal(context.area_id,area);
     const mapArea = JSON.parse(await readFile(new URL(`map-area/${area}.geojson`, out), 'utf8'));
     assert.ok(mapArea.features.length, `Missing local basemap for ${area}.`);
+    const terrain = JSON.parse(await readFile(new URL(`map-area/${area}-terrain.json`, out), 'utf8'));
+    assert.ok(terrain.sample_count > 100 && terrain.source_resolution_m === 90, `Missing dated elevation grid for ${area}.`);
+    assert.ok(terrain.sample_spacing_m >= terrain.source_resolution_m && terrain.max_m > terrain.min_m);
+    assert.ok(mapArea.features.some(feature => feature.properties.kind === 'contour'), `Missing local terrain contours for ${area}.`);
+    assert.ok(mapArea.features.filter(feature => feature.properties.kind === 'building').every(feature => ['height','levels','approximate'].includes(feature.properties.heightSource) && Number.isFinite(feature.properties.height) && feature.properties.height > feature.properties.base), `Invalid building dimensions for ${area}.`);
+    await access(new URL(`map-area/${area}-terrain/relief.png`,out));
+    const [w,s,e,n]=terrain.bounds;
+    for(let z=terrain.minzoom;z<=terrain.maxzoom;z++){
+        const size=2**z, tileX=lng=>Math.floor((lng+180)/360*size), tileY=lat=>Math.floor((1-Math.asinh(Math.tan(lat*Math.PI/180))/Math.PI)/2*size);
+        for(let x=tileX(w);x<=tileX(e);x++)for(let y=tileY(n);y<=tileY(s);y++)await access(new URL(`map-area/${area}-terrain/${z}/${x}/${y}.png`,out));
+    }
     const solar = JSON.parse(await readFile(new URL(`map-area/${area}-shade.json`, out), 'utf8'));
     assert.ok(solar.centre.every(Number.isFinite) && Array.isArray(solar.objects), `Invalid shade geometry for ${area}.`);
     if (area !== 'elmina') assert.ok(solar.objects.length, `Missing mapped-height buildings for ${area}.`);
