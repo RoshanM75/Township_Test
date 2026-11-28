@@ -2,13 +2,14 @@
 import { useEffect, useState, Suspense, type FormEvent } from 'react';
 import { useRouter,useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import '../workspace.css';
 import dynamic from 'next/dynamic';
 import { loadGraph, loadWalkingData, createWalkingAsset, recordVerification, type GraphData } from '@/lib/api';
 import { useClientReady } from '@/lib/use-client-ready';
 import { observationFields } from '@/lib/verification-fields';
 import { malaysiaInput, fromMalaysiaInput } from '@/lib/comfort';
 import type { WalkingData, VerificationTarget, AssetKind, PlaceCategory, ObservationValue } from '@/lib/walking';
-import { IS_PAGES_PREVIEW } from '@/lib/site';
+import { IS_PAGES_PREVIEW,sitePath } from '@/lib/site';
 import VerificationPreview from '@/components/walking/VerificationPreview';
 import { PILOTS,pilotFromParams,type PilotId } from '@/lib/pilots';
 import PilotSelector from '@/components/walking/PilotSelector';
@@ -79,9 +80,9 @@ function VerificationWorkspace({ area, initialTarget, initialType }: { area: Pil
         finally { setBusy(false); }
     }
     const history = (data?.verifications ?? []).filter(r => !targetId || (r.target_id === targetId && r.target_type === target)).slice(0, 30);
-    return <main className="min-h-screen bg-slate-50 px-4 py-6 font-sans text-slate-900 md:px-8">
+    return <main className="tg-workspace min-h-screen px-4 py-6 font-sans text-slate-900 md:px-8">
         <div className="mx-auto max-w-6xl space-y-6">
-            <header className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="text-3xl font-extrabold">Walking verification records</h1><p className="mt-2 max-w-3xl text-slate-600">Record what was actually observed on paths, crossings, access points and rest facilities. A mapped or reported feature stays unverified until a dated check confirms its condition.</p></div>
+            <header className="tg-work-title"><div><p className="tg-work-kicker">TownshipGo · Evidence workspace</p><h1>Walking verification records</h1><p>Record what was actually observed on paths, crossings, access points and rest facilities. A mapped or reported feature stays unverified until a dated check confirms its condition.</p></div>
                 <nav className="flex gap-4 font-bold underline"><Link href={`/resident?area=${area}`}>Plan a walk</Link><Link href={`/dashboard?area=${area}`}>Maintenance</Link></nav>
             </header>
             <PilotSelector area={area} onChange={next=>router.replace(`?area=${next}`)}/>
@@ -94,7 +95,7 @@ function VerificationWorkspace({ area, initialTarget, initialType }: { area: Pil
             <div className="grid gap-6 lg:grid-cols-2">
                 <section className="rounded-2xl border border-slate-300 bg-white p-5">
                     <h2 className="text-xl font-bold">Add a place or facility</h2><p className="mt-2 text-sm text-slate-600">Click the map to choose a position, or enter coordinates. Connecting to a nearby path is a geometric suggestion, not a verified physical link.</p>
-                    <div className="my-4 h-72 overflow-hidden rounded-xl border border-slate-300"><Map startCoords={PILOTS[area].centre} onLocationSelect={(lat, lng) => setAsset(a => ({ ...a, lat: lat.toFixed(7), lng: lng.toFixed(7) }))} selectedLocation={asset.lat && asset.lng ? [Number(asset.lat), Number(asset.lng)] : undefined} assets={data?.assets.slice(0,120) ?? []} /></div>
+                    <div className="my-4 h-72 overflow-hidden rounded-xl border border-slate-300"><Map localBasemap={sitePath(`/map-area/${area}.geojson`)} startCoords={PILOTS[area].centre} onLocationSelect={(lat, lng) => setAsset(a => ({ ...a, lat: lat.toFixed(7), lng: lng.toFixed(7) }))} selectedLocation={asset.lat && asset.lng ? [Number(asset.lat), Number(asset.lng)] : undefined} assets={data?.assets.slice(0,120) ?? []} /></div>
                     <form onSubmit={saveAsset} className="space-y-3">
                         <label className="block text-sm font-semibold">Name<input required maxLength={120} className={control} value={asset.name} onChange={e => setAsset({ ...asset, name: e.target.value })} /></label>
                         <div className="grid grid-cols-2 gap-3">

@@ -1,4 +1,5 @@
-import { AlertTriangle, Check, CloudRain, Footprints, Lightbulb, Umbrella } from 'lucide-react';
+import { AlertTriangle, Check, CloudRain, Footprints, Lightbulb, Umbrella, Circle, CheckCircle2 } from 'lucide-react';
+import { routeChoiceGroups } from '@/lib/resident-presentation';
 import { residentText, type ResidentLanguage, type ResidentLabel } from '@/lib/resident-language';
 import { roofMetres, routeLabel, walkMinutes } from '@/lib/resident-walking';
 import type { Mode } from '@/lib/routing';
@@ -46,7 +47,7 @@ export default function RouteComparison({ routes, modes, chosen, fastest, night,
     const base = routes[fastest]?.total_min ?? 0;
     const baseSun = routes[fastest]?.sun_exposure;
 
-    function choices(items: Mode[]) {
+    function choices(items: Mode[], samePath=false) {
         return items.map(mode => {
             const route = routes[mode];
             if (!route) return null;
@@ -55,29 +56,33 @@ export default function RouteComparison({ routes, modes, chosen, fastest, night,
             const sun = route.sun_exposure;
             const savings = sun && baseSun && sun.daylight_s > 0 ? Math.floor((baseSun.sun_s - sun.sun_s - sun.unknown_s) / 60) : 0;
             const extra = seconds >= 60 ? `${Math.ceil(seconds / 60)} min` : `${seconds} ${t('sec')}`;
-            return <button type="button" key={mode} className="tg-route-card" aria-pressed={chosen === mode} onClick={() => onChoose(mode)}>
-                <Icon size={20} aria-hidden />
-                <span className="tg-route-card-label"><strong>{t(routeLabel(mode, night, fastest))}</strong>
-                    {recommended === mode && <small className="tg-route-profile-match">{t('Suggested for your profile')}</small>}
-                    <RouteSun route={route} language={language} />
-                    {savings > 0 && <small>{savings} min {t('less in direct sun')}</small>}
-                    <RouteCoverage route={route} language={language} />
-                    {route.mapped_rest_stops !== undefined && route.mapped_rest_stops > 0 && <small>{route.mapped_rest_stops} {t('mapped rest locations on route')}</small>}
+            const selected=chosen===mode;
+            return <button type="button" key={mode} className="tg-route-card" data-mode={mode} aria-pressed={selected} onClick={()=>onChoose(mode)}>
+                <span className="tg-route-mode-icon"><Icon size={23} strokeWidth={1.8} aria-hidden/></span>
+                <span className="tg-route-card-label">
+                    <strong>{t(routeLabel(mode,night,fastest))}</strong>
+                    {samePath&&<small className="tg-same-path-note">{t('Same mapped path')}</small>}
+                    {recommended===mode&&<small className="tg-route-profile-match">{t('Suggested for your profile')}</small>}
+                    <RouteCoverage route={route} language={language}/>
+                    <RouteSun route={route} language={language} compact/>
+                    {savings>0&&<small>{savings} min {t('less in direct sun')}</small>}
+                    {route.mapped_rest_stops!==undefined&&route.mapped_rest_stops>0&&<small>{route.mapped_rest_stops} {t('mapped rest locations on route')}</small>}
                 </span>
-                <span className="tg-route-card-time"><strong>{walkMinutes(route)} min</strong>
-                    {seconds ? <small>{extra} {t('longer')}</small> : <small>{Math.round(route.length_m)} m</small>}
+                <span className="tg-route-card-time"><strong>{walkMinutes(route)} <small>min</small></strong>
+                    {seconds>0?<small>{extra} {t('longer')}</small>:<small>{Math.round(route.length_m)} m</small>}
+                    {selected?<CheckCircle2 size={21} className="tg-choice-indicator" aria-hidden/>:<Circle size={21} className="tg-choice-indicator" aria-hidden/>}
                 </span>
             </button>;
         });
     }
 
-    const lead = [...new Set([fastest, ...(!night ? ['coolest' as Mode] : []), 'sheltered' as Mode, chosen, ...(recommended ? [recommended] : [])])].filter(mode => modes.includes(mode));
-    const more = modes.filter(mode => !lead.includes(mode));
+    const {lead,more}=routeChoiceGroups(routes,modes,chosen,fastest,recommended);
     return <div className="tg-stack" role="group" aria-label={t('Route choices')}>
         <div className="tg-route-grid">{choices(lead)}</div>
         {more.length > 0 && <details className="tg-details">
-            <summary>{t('Other routes')}</summary>
-            <div className="tg-route-grid">{choices(more)}</div>
+            <summary>{t('More route preferences')} · {more.length}</summary>
+            <p className="tg-route-redundant">{t('Several route choices follow the same mapped path.')}</p>
+            <div className="tg-route-grid">{choices(more,true)}</div>
         </details>}
     </div>;
 }

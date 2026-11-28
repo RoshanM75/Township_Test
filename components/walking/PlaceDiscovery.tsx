@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { MapPin, ChevronRight, Utensils, Cross, Toilet, Armchair, Umbrella, Search, SlidersHorizontal, Clock3, Footprints } from 'lucide-react';
 import { usePlannerResult } from '@/lib/use-planner';
 import { requiresStepFreeProfile, type Mode } from '@/lib/routing';
 import { metres } from '@/lib/walking-geometry';
@@ -40,7 +41,6 @@ export default function PlaceDiscovery({ snapshot, request, budget, onChoose, on
     const [name, setName] = useState('');
     const [showUnavailable, setShowUnavailable] = useState(false);
     const [published, setPublished] = useState(false);
-    const [opened, setOpened] = useState(false);
     const [limit, setLimit] = useState(8);
     const [openOnly,setOpenOnly]=useState(false);
     const [publicOnly,setPublicOnly]=useState(false);
@@ -63,7 +63,7 @@ export default function PlaceDiscovery({ snapshot, request, budget, onChoose, on
         [snapshot, goal, published, name, request.origin,request.departure_at,publicOnly,noFee]);
     const search = usePlannerResult<PlaceResult[]>(snapshot,
         { type: 'discover', input: {...request,needs}, ids: matching.slice(0, limit).map(asset => asset.id),
-            modes: cover?['direct','sheltered']:['direct'] }, opened && matching.length > 0);
+            modes: cover?['direct','sheltered']:['direct'] }, matching.length > 0);
     const shown = (search.result ?? []).filter(item => {
         if(!item.route)return showUnavailable&&!openOnly;
         if(!snapshot)return true;
@@ -75,39 +75,47 @@ export default function PlaceDiscovery({ snapshot, request, budget, onChoose, on
     const facilities = useMemo(() => snapshot?.walking.assets.filter(asset =>
         (asset.kind === 'rest' || asset.kind === 'toilet') && asset.edge_id !== null && !unavailable.has(asset.id)) ?? [],
         [snapshot, unavailable]);
-    return <details className="tg-details" onToggle={event => setOpened(event.currentTarget.open)}>
-        <summary className="min-h-8 cursor-pointer font-bold">Reachable places & comfort <span className="text-sm font-normal">· {budget} min on foot</span></summary>
-        <div className="mt-3 space-y-3">
-            <p className="tg-small">Find places you can walk to with your current requirements, not just the nearest pin.</p>
-            <div className="flex flex-wrap gap-2" aria-label="Quick destination searches">
-                {[['food','Lunch'],['pharmacy','Pharmacy'],['toilet','Toilet'],['rest','Rest'],['shelter','Rain cover']].map(([value,label])=><button key={value} type="button" aria-pressed={goal===value} className={'tg-btn '+(goal===value?'tg-btn-primary':'')} onClick={()=>{setGoal(value);setLimit(8);}}>{label}</button>)}
+    const filterCount=[openOnly,publicOnly,noFee,stepFree,checkedOnly,cover,published,showUnavailable].filter(Boolean).length;
+    return <section className="tg-discovery" aria-label="Reachable places & comfort">
+        <div className="tg-stack">
+            <div className="tg-discovery-intro"><span className="tg-kicker"><Footprints size={15} aria-hidden/> {budget} min on foot</span>
+                <p>Find places you can reach with your current walking requirements, not just the nearest pin.</p></div>
+            <div className="tg-category-chips" aria-label="Quick destination searches">
+                {([{id:'food',label:'Lunch',Icon:Utensils},{id:'pharmacy',label:'Pharmacy',Icon:Cross},
+                    {id:'toilet',label:'Toilet',Icon:Toilet},{id:'rest',label:'Rest',Icon:Armchair},{id:'shelter',label:'Rain cover',Icon:Umbrella}]).map(({id,label,Icon})=>
+                    <button key={id} type="button" aria-pressed={goal===id} className="tg-filter-chip" onClick={()=>{setGoal(goal===id?'all':id);setLimit(8);}}><Icon size={17} aria-hidden />{label}</button>)}
             </div>
-            <label className="block text-sm font-semibold">Name or street<input type="search" placeholder="e.g. pharmacy or café" className="tg-input mt-1" value={name} onChange={event => {
+            <label className="tg-label">Name or street<span className="tg-icon-input"><Search size={19} aria-hidden/><input type="search" placeholder="e.g. pharmacy or café" value={name} onChange={event => {
                 setName(event.target.value); setLimit(8);
-            }} /></label>
+            }} /></span></label>
             <label className="block text-sm font-semibold">What do you need?
                 <select value={goal} onChange={event => { setGoal(event.target.value); setLimit(8); }} className="tg-input mt-1">
                     {PLACE_GOALS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </select>
             </label>
-            <details className="tg-details"><summary>Access, opening and comfort filters</summary><div className="mt-2 space-y-1">
+            <details className="tg-details tg-discovery-filters"><summary><SlidersHorizontal size={18} aria-hidden/>Access, opening and comfort filters{filterCount>0&&<span className="tg-count-pill">{filterCount}</span>}</summary><div className="mt-2 space-y-1">
                 {([
                     ['Open at my arrival',openOnly,setOpenOnly],['Step-free access',stepFree,setStepFree],
                     ['Only routes with current required checks',checkedOnly,setCheckedOnly],['Prefer more roof cover',cover,setCover],
                     ['Recorded public access',publicOnly,setPublicOnly],['Recorded no fee',noFee,setNoFee],
                     ['Directory entries from venue or public agencies',published,setPublished],['Include unmatched places',showUnavailable,setShowUnavailable],
                 ] as const).map(([label,checked,set])=><label key={label} className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" className="h-5 w-5 shrink-0" checked={checked} onChange={e=>{set(e.target.checked); setLimit(8);}}/>{label}</label>)}
+                {filterCount>0&&<button type="button" className="tg-text-action" onClick={()=>{setOpenOnly(false);setPublicOnly(false);setNoFee(false);setStepFree(false);setCheckedOnly(false);setCover(false);setPublished(false);setShowUnavailable(false);setLimit(8);}}>Clear filters</button>}
                 <p className="tg-small">Unknown hours, fees and access are not assumed. Filters add to, rather than remove, your required conditions.</p>
             </div></details>
             {warning && goal==='shelter' && <p className="tg-note tg-warnbox">A weather warning affects this area. Look for an appropriate indoor location or delay the journey. Roof cover alone is not adequate storm protection.</p>}
-            {search.pending && <p role="status">Checking walking routes and your needs…</p>}
+            {search.pending && <p className="tg-loading-row" role="status"><span aria-hidden className="tg-loader"/>Checking walking routes and your needs…</p>}
             {search.error && <p role="alert">{search.error}</p>}
             {!search.pending && shown.length === 0 && <p className="text-sm">{matching.length
                 ? 'No routes or arrival conditions matched these filters. Try other places or check more results.'
                 : 'No mapped places match this search.'}</p>}
-            <ul className="space-y-2">{shown.map(({ destination, route, reasons }) => <li key={destination.id}
-                className="tg-reliability-item space-y-1">
-                <button type="button" onClick={() => onChoose(destination,needs,route?.mode)} className="min-h-11 w-full text-left font-bold underline">{destination.name}</button>
+            {!!shown.length&&<div className="tg-result-heading"><h3>Nearby results</h3><span>{shown.length} shown</span></div>}
+            <ul className="tg-result-list">{shown.map(({ destination, route, reasons }) => <li key={destination.id}
+                className="tg-place-result">
+                <button type="button" onClick={() => onChoose(destination,needs,route?.mode)} className="tg-place-result-title">
+                    <span className="tg-place-result-icon"><MapPin size={20} aria-hidden/></span><strong>{destination.name}</strong>
+                    <span className="tg-place-result-time">{route&&<><Clock3 size={15} aria-hidden/>{Math.ceil(route.total_min)} min</>}<ChevronRight size={18} aria-hidden/></span>
+                </button>
                 {typeof destination.properties.official_address === 'string' && <p className="text-sm">{destination.properties.official_address}</p>}
                 {typeof destination.properties.official_visit_note === 'string' && <p className="text-sm">{destination.properties.official_visit_note}</p>}
                 <p className="text-sm font-bold">{route ? `${Math.ceil(route.total_min)} min including rests · ${route.suitability === 'green'
@@ -128,7 +136,7 @@ export default function PlaceDiscovery({ snapshot, request, budget, onChoose, on
             {matching.length > 0 && <p className="text-xs text-slate-600">Checking {Math.min(limit, matching.length)} of {matching.length} mapped places, nearest first.
                 Results use your selected start, departure, pace and requirements.</p>}
         </div>
-    </details>;
+    </section>;
 }
 
 function arrivalHours(route:JourneyRoute,snapshot:PlanningSnapshot) {

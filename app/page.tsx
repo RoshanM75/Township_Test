@@ -1,53 +1,88 @@
 import Link from 'next/link';
-import { Footprints, ArrowRight, ArrowUpRight, Sun, Accessibility, ClipboardCheck, MapPin } from 'lucide-react';
+import { Footprints, ArrowRight, ArrowUpRight, ChevronDown, Sun, Accessibility, ClipboardCheck, MapPin, Route, ListChecks, Coffee, TrainFront, ShieldCheck, Wrench, BookOpen } from 'lucide-react';
 import PreviewNotice from '@/components/walking/PreviewNotice';
 import { IS_PAGES_PREVIEW } from '@/lib/site';
 import HomeWalkPreview from '@/components/walking/HomeWalkPreview';
-import { KL_PILOT_AVAILABLE,DEFAULT_PILOT,PILOTS,isPilotAvailable } from '@/lib/pilots';
+import { DEFAULT_PILOT,isPilotAvailable } from '@/lib/pilots';
 import { DESTINATIONS } from '@/lib/precinct';
+import './home.css';
+
+const areaCards=[
+    { id:'pasar-seni', title:'Central Kuala Lumpur', tag:'City neighbourhoods', description:'Pasar Seni, Brickfields, Bangsar, Pudu, Bukit Bintang and the gardens.', Icon:TrainFront },
+    { id:'um-campus', title:'Universiti Malaya', tag:'Campus life', description:'Walk between classes, libraries, colleges and everyday campus facilities.', Icon:BookOpen },
+    { id:'elmina', title:'Elmina', tag:'Township example', description:'Explore a neighbourhood walking network with the mapped bridges example.', Icon:Route },
+] as const;
 
 export default function Home() {
-    const umDefault = DEFAULT_PILOT === 'um-campus';
     const plannerHref=`/resident?area=${DEFAULT_PILOT}`;
     const coverageHref=`/verification?area=${DEFAULT_PILOT}`;
-    return (
-        <div className="min-h-screen bg-[#f6f7f2] font-sans text-[#24392f]">
-            <header className="border-b border-[#dce2d8] bg-[#f6f7f2] px-5 sm:px-8">
-                <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 py-4">
-                    <Link href="/" className="flex min-h-11 items-center gap-3 text-xl font-extrabold"><span className="rounded-xl bg-[#a4262c] p-2 text-white"><Footprints size={24} aria-hidden /></span>TownshipGo</Link>
-                    <nav aria-label="Main navigation" className="flex flex-wrap items-center gap-x-5 text-sm font-bold"><Link href={plannerHref} className="inline-flex min-h-11 items-center">Walking planner</Link><Link href={coverageHref} className="inline-flex min-h-11 items-center">Path information</Link><Link href={`/dashboard?area=${DEFAULT_PILOT}`} className="hidden min-h-11 items-center sm:inline-flex">Maintenance</Link></nav>
-                </div>
-            </header>
-            <main className="mx-auto max-w-7xl px-5 pb-12 pt-8 sm:px-8 lg:pt-12">
-                <div className="grid items-center gap-10 lg:grid-cols-[1fr_1.05fr] lg:gap-14">
-                    <section>
-                        <p className="mb-5 inline-flex items-center gap-2 rounded-full border border-[#ceddce] bg-[#eaf1e7] px-3 py-2 text-xs font-bold uppercase tracking-widest text-[#3c604a]"><MapPin size={15} aria-hidden />{PILOTS[DEFAULT_PILOT].name}</p>
-                        <h1 className="max-w-xl text-[clamp(2.6rem,5vw,4.6rem)] font-extrabold leading-[1.08] tracking-[-.045em]">A better walk,<br /><span className="text-[#47745a]">on your terms.</span></h1>
-                        <p className="mt-6 max-w-lg text-lg leading-relaxed text-[#536355]">{KL_PILOT_AVAILABLE?'Discover central KL on foot, from station areas to heritage streets. Find mapped places and facilities, compare the conditions along the route, and see what still needs checking.':umDefault?'Find classes and campus landmarks on the mapped pedestrian network. Compare roof cover and walking conditions before you leave.':'Try a walk between the Elmina bridges. Choose your pace, compare the mapped paths and see which conditions still need checking.'}</p>
-                        {!KL_PILOT_AVAILABLE&&<p className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">Central KL pilot · data pending. Pasar Seni, Chinatown and Masjid Jamek will open when their real map data is ready.</p>}
-                        <div className="mt-7 flex flex-wrap gap-3"><Link href={plannerHref} className="inline-flex min-h-14 items-center justify-center gap-3 rounded-xl bg-[#A4262C] px-6 py-3 font-bold text-white shadow-sm">Plan a walk<ArrowRight size={20} aria-hidden /></Link>
-                            <Link href={coverageHref} className="inline-flex min-h-14 items-center gap-2 rounded-xl border border-[#c6d2c6] bg-white px-5 py-3 font-bold">Explore path information<ArrowUpRight size={18} aria-hidden /></Link></div>
-                        {isPilotAvailable('um-campus') && !umDefault && <Link href="/resident?area=um-campus" className="mt-3 inline-flex min-h-11 items-center gap-2 font-bold underline"><MapPin size={18} aria-hidden /> Walk at UM campus</Link>}
-                        <div className="mt-7 flex flex-wrap gap-x-5 gap-y-2 text-sm font-semibold text-[#536355]"><span>Pedestrian routes</span><span>Personal walking needs</span><span>Explainable confidence</span></div>
-                        {DEFAULT_PILOT!=='elmina'&&<p className="mt-4 text-sm text-[#536355]">New to the planner? The <a className="inline-flex min-h-11 items-center font-bold underline" href="#elmina-example">Elmina bridges example</a> is available below.</p>}
-                    </section>
-                    <HomeWalkPreview />
-                </div>
-                {DEFAULT_PILOT!=='elmina'&&<section id="elmina-example" aria-label="Elmina bridges example" className="mt-8 rounded-2xl border border-[#dce2d8] bg-white p-5">
-                    <h2 className="text-lg font-extrabold">Learn with the Elmina bridges example</h2>
-                    <p className="mt-2 text-sm text-[#536355]">Try either bridge to see how your pace, walking needs and route information work. These examples use a separate mapped area.</p>
-                    <div className="mt-3 flex flex-wrap gap-3">{DESTINATIONS.map(place=><Link key={place.id} href={`/resident?${new URLSearchParams({area:'elmina',destId:place.id})}`} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#c6d2c6] px-4 py-2 text-sm font-bold underline">{place.name}<ArrowUpRight size={17} aria-hidden/></Link>)}</div>
-                </section>}
-                <section aria-label="What shapes your walk" className="mt-10 grid gap-4 md:grid-cols-3 lg:mt-14">
-                    {[
-                        { Icon: Sun, title: 'Look beyond the distance', text: 'Compare estimated sun exposure and lighting at your departure time. See where comfort data is still missing.' },
-                        { Icon: Accessibility, title: 'Make room for your needs', text: 'Choose your pace, step-free requirements and rest interval. A usable arrival point matters as much as the path.' },
-                        { Icon: ClipboardCheck, title: 'Know what has been checked', text: 'Route colours separate personal fit from uncertainty. Mapped features, reports and current observations stay distinct.' },
-                    ].map(({ Icon, title, text }) => <article key={title} className="rounded-2xl border border-[#dce2d8] bg-white p-6"><Icon size={24} className="text-[#47745a]" aria-hidden /><h2 className="mt-4 text-lg font-extrabold">{title}</h2><p className="mt-2 text-sm leading-relaxed text-[#536355]">{text}</p></article>)}
+    return <div className="tg-home">
+        <header className="tg-home-header">
+            <div className="tg-home-wrap tg-home-nav">
+                <Link href="/" className="tg-wordmark"><span><Footprints size={24} strokeWidth={1.8} aria-hidden/></span>TownshipGo</Link>
+                <nav aria-label="Main navigation">
+                    <Link href={plannerHref} className="tg-home-nav-primary">Walking planner<ArrowUpRight size={16} aria-hidden/></Link>
+                    <Link href={coverageHref}>Path information</Link>
+                    <Link href={`/dashboard?area=${DEFAULT_PILOT}`}>Operator workspace</Link>
+                </nav>
+            </div>
+        </header>
+        <main className="tg-home-wrap">
+            <div className="tg-home-hero">
+                <section className="tg-home-intro">
+                    <p className="tg-home-eyebrow"><span/><MapPin size={15} aria-hidden/> People-first walking · Malaysia</p>
+                    <h1>Know more.<br/>Walk your <em>way.</em></h1>
+                    <p className="tg-home-lead">Everyday walks are about more than distance. Find places you can actually reach, plan around shade and access needs, and help improve the paths in your neighbourhood.</p>
+                    <div className="tg-home-actions">
+                        <Link href={plannerHref} className="tg-home-button tg-home-primary">Plan a walk <ArrowRight size={20} aria-hidden/></Link>
+                        <a href="#walking-areas" className="tg-home-button">Choose your area<ChevronDown size={19} aria-hidden/></a>
+                    </div>
+                    <div className="tg-home-pill-row">
+                        <span><ShieldCheck size={16} aria-hidden/>Clear condition checks</span>
+                        <span><Accessibility size={16} aria-hidden/>Your walking needs</span>
+                        <span><Sun size={16} aria-hidden/>Shade and weather</span>
+                    </div>
                 </section>
-                <div className="mt-7"><PreviewNotice /></div>
-                <footer className="mt-8 flex flex-wrap justify-between gap-4 border-t border-[#dce2d8] pt-6 text-xs leading-relaxed text-[#536355]"><p>© OpenStreetMap contributors · {IS_PAGES_PREVIEW ? 'Dated source snapshots' : 'Local pedestrian network'}<br />Estimates support planning; current conditions still need checking.</p><div className="flex flex-wrap gap-4"><Link href="/dashboard" className="inline-flex min-h-11 items-center font-bold underline">Maintenance dashboard</Link><Link href="/verification" className="inline-flex min-h-11 items-center font-bold underline">{IS_PAGES_PREVIEW ? 'View mapped places and verification coverage' : 'Verify paths, entrances and rest facilities'}</Link></div></footer>
-            </main>
-        </div>
-    );
+                <HomeWalkPreview />
+            </div>
+
+            <section id="walking-areas" className="tg-home-section" aria-labelledby="walking-areas-title">
+                <div className="tg-home-section-title"><div><p className="tg-home-kicker">Choose a starting area</p><h2 id="walking-areas-title">Your neighbourhood, on foot.</h2></div><p>Explore the mapped pilot areas at your own pace.</p></div>
+                <div className="tg-home-areas">
+                    {areaCards.map(({id,title,tag,description,Icon})=>{
+                        const available=isPilotAvailable(id);
+                        return <article key={id} className="tg-home-area" data-area={id}>
+                            <div className="tg-home-area-top"><span className="tg-home-area-icon"><Icon size={24} strokeWidth={1.8} aria-hidden/></span><span className="tg-home-area-tag">{available?tag:'Data pending'}</span></div>
+                            <h3>{title}</h3><p>{description}</p>
+                            {available?<Link href={`/resident?area=${id}`}>Open walking map<ArrowUpRight size={18} aria-hidden/></Link>:<p className="tg-home-muted">This pilot opens when its map data is available.</p>}
+                            {id==='elmina'&&available&&<div className="tg-home-example-links">{DESTINATIONS.map(place=><Link key={place.id} href={`/resident?${new URLSearchParams({area:id,destId:place.id})}`}>{place.name}</Link>)}</div>}
+                        </article>;
+                    })}
+                </div>
+            </section>
+
+            <section className="tg-home-section" aria-labelledby="features-title">
+                <div className="tg-home-section-title"><div><p className="tg-home-kicker">Designed for everyday life</p><h2 id="features-title">More than directions.</h2></div><p>Make an informed choice before setting out.</p></div>
+                <div className="tg-home-bento">
+                    <article className="tg-home-feature tg-home-feature-lead"><span className="tg-home-feature-ico"><ClipboardCheck size={28} aria-hidden/></span>
+                        <div><h3>Know what has been checked.</h3><p>Mapped information, community reports and current field observations are clearly separated. Review the conditions that matter to your walk.</p></div>
+                        <div className="tg-home-evidence"><span><ShieldCheck size={17} aria-hidden/>Field-checked</span><span><MapPin size={17} aria-hidden/>Mapped</span><span><Sun size={17} aria-hidden/>Estimated</span></div>
+                        <Link href={plannerHref}>Explore journey readiness<ArrowRight size={18} aria-hidden/></Link>
+                    </article>
+                    <article className="tg-home-feature"><span className="tg-home-feature-ico"><ListChecks size={24} aria-hidden/></span><h3>Make time for your errands.</h3><p>Plan multiple stops and a return journey within your available time.</p></article>
+                    <article className="tg-home-feature"><span className="tg-home-feature-ico"><Coffee size={24} aria-hidden/></span><h3>Discover reachable places.</h3><p>Find a nearby seat, café, toilet or sheltered waiting area by its walking connection.</p></article>
+                    <article className="tg-home-feature"><span className="tg-home-feature-ico"><Accessibility size={24} aria-hidden/></span><h3>Walk at your own pace.</h3><p>Keep your access and rest preferences in your private, device-saved profile.</p></article>
+                    <article className="tg-home-feature"><span className="tg-home-feature-ico"><Wrench size={24} aria-hidden/></span><h3>Help improve local paths.</h3><p>Report barriers or share public route guides for a review. Operators can compare potential repairs.</p></article>
+                </div>
+            </section>
+
+            <div className="tg-home-section tg-home-operator">
+                <span className="tg-home-area-icon"><Wrench size={26} aria-hidden/></span>
+                <div><p className="tg-home-kicker">For neighbourhood operators</p><h2>From feedback to better footpaths.</h2><p>Review the maintenance queue and model which improvements would reconnect everyday places.</p></div>
+                <Link href={`/dashboard?area=${DEFAULT_PILOT}`} className="tg-home-button">Operator workspace<ArrowUpRight size={18} aria-hidden/></Link>
+            </div>
+            <PreviewNotice/>
+            <footer className="tg-home-footer"><div><Link href="/" className="tg-wordmark"><span><Footprints size={21} aria-hidden/></span>TownshipGo</Link><p>© OpenStreetMap contributors · {IS_PAGES_PREVIEW?'Dated source snapshots':'Local pedestrian network'}.<br/>Estimates support planning; on-site checks still matter.</p></div><div><Link href={coverageHref}>Map sources and path records</Link><Link href={`/dashboard?area=${DEFAULT_PILOT}`}>Maintenance dashboard</Link></div></footer>
+        </main>
+    </div>;
 }

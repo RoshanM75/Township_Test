@@ -291,28 +291,28 @@ function MapBehavior({
         width: 48,
         height: 48,
         borderRadius: 14,
-        border: '3px solid #1B1F23',
+        border: '1px solid #d6d4cf',
         background: '#fff',
         color: '#1B1F23',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         cursor: 'pointer',
-        boxShadow: '0 2px 8px rgba(0,0,0,.3)',
+        boxShadow: '0 3px 12px rgba(39,35,43,.14)',
     };
 
     return (
         <>
             {/* Zoom: top right */}
             <div
-                ref={stopPropagation}
+                ref={stopPropagation} className="tg-leaflet-zoom"
                 style={{ position: 'absolute', top: 12, right: 12, zIndex: 1000, display: 'flex', flexDirection: 'column', gap: 10 }}
             >
                 <button type="button" aria-label={residentText(language, 'Zoom in')} style={squareBtn} onClick={() => map.zoomIn()}>
-                    <Plus size={26} strokeWidth={3} aria-hidden />
+                    <Plus size={23} strokeWidth={2.4} aria-hidden />
                 </button>
                 <button type="button" aria-label={residentText(language, 'Zoom out')} style={squareBtn} onClick={() => map.zoomOut()}>
-                    <Minus size={26} strokeWidth={3} aria-hidden />
+                    <Minus size={23} strokeWidth={2.4} aria-hidden />
                 </button>
             </div>
 
@@ -330,7 +330,7 @@ function MapBehavior({
                         background: ROUTE_OUTLINE,
                         border: '1px solid #ded2ca',
                         color: brand,
-                        font: '700 1rem system-ui,sans-serif',
+                        font: '650 .9rem var(--font-geist-sans),system-ui,sans-serif',
                     }}
                 >
                     <RouteIcon size={20} aria-hidden />
@@ -516,7 +516,7 @@ export default function InteractiveMap({
                     focus={focus}
                     reduceMotion={reduceMotion}
                     brand={brand}
-                    fitLabel={fitLabel ?? (overview ? 'Show all' : residentText(language, 'Whole route'))}
+                    fitLabel={fitLabel ?? (overview ? 'Show all' : residentText(language, routes?.length?'Whole route':'Recenter'))}
                     maxZoom={overview ? 17 : 18}
                     language={language}
                 />

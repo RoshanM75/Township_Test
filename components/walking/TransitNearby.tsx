@@ -45,8 +45,9 @@ export default function TransitNearby({ context, assets, origin, at, onChoose, o
     const shuttleSource = context.sources.find(source => source.id === 'um-shuttle');
     const feedSource = selected ? context.sources.find(source =>
         (selected.agency === 'um-shuttle' && source.id === 'um-shuttle') || source.name.endsWith(`· ${selected.agency}`)) : null;
-    return <details className="tg-details">
-        <summary><span className="inline-flex items-center gap-2"><BusFront size={18} aria-hidden /> Transit · first & last mile</span></summary>
+    return <section className="tg-transit" aria-label="Transit stops and exits">
+        <div className="tg-discovery-intro"><span className="tg-kicker"><BusFront size={16} aria-hidden/> First and last mile</span>
+            <p>Find a nearby stop or start at a mapped station exit. Published schedules and access conditions may change.</p></div>
         <div className="tg-stack mt-3 text-sm">
             {context.area_id === 'um-campus' && shuttleSource && <a href={shuttleSource.url} target="_blank" rel="noreferrer"
                 className="inline-flex min-h-11 items-center font-bold underline">UM campus shuttle information</a>}
@@ -123,5 +124,5 @@ export default function TransitNearby({ context, assets, origin, at, onChoose, o
                 <a href="https://developer.data.gov.my/realtime-api/gtfs-static.en" target="_blank" rel="noreferrer" className="text-xs underline">Prasarana via data.gov.my · CC BY 4.0</a>
             </> : <p role="status">Timetable stops are unavailable for this area.</p>}
         </div>
-    </details>;
+    </section>;
 }

@@ -14,7 +14,7 @@ import type { GraphData } from '@/lib/api';
 import type { CompletedWalk } from '@/lib/walk-library';
 import { addTrackFix, emptyTrack } from '@/lib/walk-tracking';
 import { PILOTS, pointInPilot, type PilotId } from '@/lib/pilots';
-import { IS_PAGES_PREVIEW } from '@/lib/site';
+import { IS_PAGES_PREVIEW,sitePath } from '@/lib/site';
 import type { StartPoint } from '@/lib/start-points';
 import { residentText, type ResidentLanguage } from '@/lib/resident-language';
 
@@ -39,7 +39,7 @@ function readDraft(area: PilotId, dataset: string): CommunityDraft | null {
 
 export function CommunityPathMap({ area, points }: { area: PilotId; points: RoutePoint[] }) {
     return <div className="h-56 overflow-hidden rounded-xl border border-slate-300">
-        <Map startCoords={points[0] ?? PILOTS[area].centre} endCoords={points.at(-1)}
+        <Map localBasemap={sitePath(`/map-area/${area}.geojson`)} startCoords={points[0] ?? PILOTS[area].centre} endCoords={points.at(-1)}
             routes={points.length >= 2 ? [{ id: 'community', name: 'Community route', route_type: 'direct', coordinates: points }] : []}
             showLayerControls={false} reduceMotion />
     </div>;
@@ -279,7 +279,7 @@ function CommunityRouteEditor({ area, dataset, graph, walks, startPoints, initia
             <legend className="tg-label">Build the route in walking order</legend>
             <p className="tg-small">Add close-together waypoints along the public paths you use.</p>
             <div className="h-56 overflow-hidden rounded-xl border border-slate-300">
-                <Map startCoords={line[0] ?? PILOTS[area].centre} endCoords={line.at(-1)} showLayerControls={false} reduceMotion
+                <Map localBasemap={sitePath(`/map-area/${area}.geojson`)} startCoords={line[0] ?? PILOTS[area].centre} endCoords={line.at(-1)} showLayerControls={false} reduceMotion
                     routes={line.length >= 2 ? [{ id: 'draft', name: 'Route draft', route_type: 'direct', coordinates: line }] : []}
                     selectedLocation={line.at(-1)} onLocationSelect={recording || busy ? undefined : (lat, lng) => addPoint([lat, lng])} />
             </div>

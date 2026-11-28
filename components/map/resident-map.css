@@ -120,3 +120,56 @@
 .tg-map-shade-key i { width: .75rem; border-top: 3px solid #a65415; }
 .tg-map-shade-key i[data-shade="shade"] { border-color: #335ca3; }
 .tg-map-shade-key i[data-shade="unknown"] { border-top-style: dashed; border-color: #64748b; }
+
+/* One-tap map view switch and compact overlay islands. The underlying detailed
+   OSM basemap, 3D styling and data layers are deliberately left intact. */
+.tg-map-controls { top:.7rem;left:.7rem;gap:.4rem;max-width:calc(100% - 4.2rem); }
+.tg-map-mode-switch { display:flex;align-items:center;background:var(--surface,#fffefa);border:1px solid var(--line,#dedbd5);box-shadow:0 3px 12px #27232b19;border-radius:.95rem;padding:.2rem;gap:.15rem; }
+.tg-map-mode-switch button { display:flex;align-items:center;justify-content:center;gap:.28rem;padding:0 .45rem;min-height:2.75rem;min-width:2.9rem;border-radius:.72rem;font-size:.8rem;font-weight:680;color:var(--muted,#625e63); }
+.tg-map-mode-switch button[aria-pressed="true"] { background:var(--brand,#8b2b45);color:white; }
+.tg-map-choice,.tg-map-fit,.tg-map-report { border-radius:.9rem;border-color:var(--line,#dedbd5);box-shadow:0 3px 12px #27232b19;font-weight:660; }
+.tg-map-choice { min-height:2.9rem;padding-inline:.6rem;font-size:.84rem; }
+.tg-map-choice[data-active="true"] { background:var(--brand-soft,#f6e9ec);color:var(--brand-ink,#692038);border-color:var(--brand,#8b2b45); }
+.tg-map-nearby { min-width:2.9rem;justify-content:center; }
+.tg-map-nearby>span { display:inline; }
+.tg-map-choice select { font-weight:600; }
+.tg-map-settings-panel { padding:.8rem;gap:.75rem;min-width:min(16rem,100%);border-radius:1rem; }
+.tg-map-settings-panel label { color:var(--muted,#625e63);font-size:.85rem; }
+.tg-map-fit,.tg-map-report { min-height:2.85rem;font-size:.88rem;padding:.6rem .7rem;max-width:calc(50% - .6rem); }
+.tg-map-status { border-radius:.75rem;max-width:100%;font-size:.78rem; line-height:1.4; }
+.tg-map-roof-key { font-size:.76rem;font-weight:630; }
+.tg-map-keys { bottom:5.35rem;left:.7rem; }
+.resident-map .maplibregl-ctrl-group,.resident-map .leaflet-control-zoom { border:1px solid #d6d4cf;border-radius:.85rem;overflow:hidden;box-shadow:0 3px 12px #27232b19; }
+.resident-map .leaflet-control-zoom a { border-radius:0; }
+@media(max-width:390px){
+    .tg-map-mode-switch button { padding-inline:.36rem;min-width:2.75rem; }
+    .tg-map-mode-switch button svg { display:none; }
+    .tg-map-controls { gap:.3rem; }
+    .tg-map-choice { padding-inline:.5rem; }
+}
+.tg.hc .tg-map-mode-switch,.tg.hc .tg-map-choice { border:2px solid black; }
+
+.tg-map { container-type:size;container-name:walkmap; }
+@media(max-width:374px){.tg-map-nearby>span { display:none; }}
+@container walkmap (max-height:245px) {
+    .tg-map-controls { top:.38rem;left:.45rem;gap:.25rem; }
+    .tg-map-choice { padding-inline:.45rem; }
+    .tg-map-nearby>span { display:none; }
+    .tg-map-keys { left:.45rem;bottom:4.65rem; }
+    .tg-map-fit,.tg-map-report { bottom:1.55rem; }
+    .resident-map .maplibregl-ctrl-top-right .maplibregl-ctrl-group { margin:.38rem .45rem 0 0; }
+}
+@container walkmap (max-height:195px) {
+    .tg-map-report { right:4.65rem;min-width:2.75rem;justify-content:center; }
+    .tg-map-report>span { display:none; }
+    .tg-map-fit>span,.tg-leaflet-fit button>span { display:none; }
+    .tg-map-fit,.tg-leaflet-fit button { min-width:2.75rem;justify-content:center; }
+    .tg-map-keys { bottom:4.5rem; }
+    .tg-map-mode-switch button svg { display:none; }
+    .tg-map-status { padding:.25rem .4rem; }
+}
+.tg-map-loading { position:absolute; z-index:1005; left:50%; top:50%; transform:translate(-50%,-50%); display:flex;align-items:center;gap:.55rem;
+    min-height:2.75rem;max-width:80%;padding:.55rem .8rem;border:1px solid #dedbd5;border-radius:.85rem;color:#4d484c;background:#fffefa;box-shadow:0 3px 12px #27232b16;font-size:.85rem;font-weight:650;pointer-events:none;text-align:center; }
+.tg-map-spinner { width:1rem;height:1rem;border-radius:50%;border:2px solid #dedbd5;border-top-color:#8b2b45;animation:tg-map-spin .8s linear infinite;flex:none; }
+@keyframes tg-map-spin { to { transform:rotate(360deg); } }
+@media(prefers-reduced-motion:reduce){.tg-map-spinner{animation:none;}}
