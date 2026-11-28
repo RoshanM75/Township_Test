@@ -202,7 +202,9 @@
 }
 .tg-terrain-label-canvas { position:absolute;inset:0;pointer-events:none;z-index:1; }
 .resident-map .maplibregl-marker { z-index:2; }
-.resident-map .maplibregl-popup { z-index:3; }
+.resident-map .maplibregl-popup { z-index:1160; }
+.resident-map .tg-detail-popup .leaflet-popup-content { margin:1rem 2.4rem .9rem .9rem;font-size:.86rem; }
+.resident-map .tg-detail-popup .leaflet-popup-close-button { width:2.6rem;height:2.6rem;display:grid;place-items:center;font-size:1.35rem; }
 .resident-map .maplibregl-ctrl-attrib { max-width:calc(100vw - 4.4rem);font-size:10px;margin-bottom:.2rem; }
 @container walkmap (max-height:195px){
     .resident-map .maplibregl-ctrl-attrib { max-width:calc(100cqw - .75rem);font-size:9.5px;margin-left:.25rem; }

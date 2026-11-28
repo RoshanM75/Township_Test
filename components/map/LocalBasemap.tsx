@@ -235,7 +235,12 @@ class DetailCanvas extends L.Layer {
         const {title,lines}=featureDescription(props,this.detailOptions.language),panel=document.createElement('div'),heading=document.createElement('strong');
         heading.textContent=title;panel.append(heading);
         for(const line of lines){const p=document.createElement('p');p.textContent=line;panel.append(p);}
-        L.popup({maxWidth:240,autoPanPadding:[18,28]}).setLatLng(event.latlng).setContent(panel).openOn(map);
+        // Reserve space for Layers, the zoom buttons and the bottom controls.
+        // Otherwise the detail card's close button can land underneath them.
+        const size=map.getSize();
+        L.popup({className:'tg-detail-popup',maxWidth:Math.max(130,Math.min(240,size.x-145)),
+            maxHeight:Math.max(72,size.y-170),autoPanPaddingTopLeft:[12,72],autoPanPaddingBottomRight:[66,80]})
+            .setLatLng(event.latlng).setContent(panel).openOn(map);
     }
 }
 
