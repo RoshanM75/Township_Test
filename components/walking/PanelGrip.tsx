@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { ChevronDown, ChevronUp, Maximize2, Minimize2 } from 'lucide-react';
 import { residentText, type ResidentLabel, type ResidentLanguage } from '@/lib/resident-language';
 
@@ -12,13 +12,24 @@ export default function PanelGrip({ state, openLabel, controls, language, onChan
 }) {
     const start = useRef<number | null>(null);
     const handledPointer = useRef(false);
+    const grip = useRef<HTMLButtonElement>(null);
+    useEffect(()=>{
+        const element=grip.current;
+        // The sheet moves as pointer-up completes a touch action. Suppress the
+        // subsequent emulated click so it cannot activate a newly exposed card.
+        const preventEmulatedClick=(event:TouchEvent)=>{
+            if(handledPointer.current&&event.cancelable)event.preventDefault();
+        };
+        element?.addEventListener('touchend',preventEmulatedClick,{passive:false});
+        return ()=>element?.removeEventListener('touchend',preventEmulatedClick);
+    },[]);
     const open = state !== 'min';
     const Icon = open ? ChevronDown : ChevronUp;
     const t=(label:ResidentLabel)=>residentText(language,label);
     const up=()=>onChange(panelStep(state,'up'));
     const down=()=>onChange(panelStep(state,'down'));
     return <div className="tg-grip-group">
-        <button type="button" className="tg-panel-grip" aria-controls={controls} aria-expanded={open}
+        <button ref={grip} type="button" className="tg-panel-grip" aria-controls={controls} aria-expanded={open}
             onPointerDown={event => {
                 if (!event.isPrimary || event.button !== 0) return;
                 start.current = event.clientY;
